@@ -17,7 +17,7 @@ export class Config {
   private readonly pullLogsIntervalMs: number;
   private readonly latestBlockStrategy: BlockNumberType;
   private readonly dbPath: string;
-  private readonly addresses: string[];
+  private addresses: string[];
   private readonly topics: (string | string[])[] | undefined;
   private readonly logLevel: string;
   private readonly logPretty: boolean;
@@ -25,6 +25,7 @@ export class Config {
   private readonly logFileSize: string | undefined;
   private readonly logFileFrequency: 'daily' | 'hourly' | undefined;
   private readonly logFileMaxFiles: number;
+  private readonly addressesBatchSize: number;
 
   constructor(params?: {
     rpcUrl: string;
@@ -44,6 +45,7 @@ export class Config {
     logFileSize?: string;
     logFileFrequency?: 'daily' | 'hourly';
     logFileMaxFiles?: number;
+    addressesBatchSize?: number;
   }) {
     if (!params) {
       let topics: (string | string[])[] | undefined = undefined;
@@ -75,11 +77,8 @@ export class Config {
         logFileFrequency: (process.env.LOG_FILE_FREQUENCY as 'daily' | 'hourly') || undefined,
         logFileMaxFiles: envInt('LOG_FILE_MAX_FILES', 0),
         latestBlockStrategy: process.env.LATEST_BLOCK_STRATEGY as unknown as BlockNumberType,
+        addressesBatchSize: envInt('ADDRESSES_BATCH_SIZE', 5),
       };
-    }
-
-    if (!params.addresses || !params.addresses.length) {
-      throw new Error('at least one address must be specified for filter');
     }
 
     this.rpcUrl = params.rpcUrl;
@@ -99,6 +98,7 @@ export class Config {
     this.logFileFrequency = params.logFileFrequency;
     this.logFileMaxFiles = params.logFileMaxFiles ?? 0;
     this.latestBlockStrategy = params.latestBlockStrategy ?? BlockNumberType.Latest;
+    this.addressesBatchSize = params.addressesBatchSize ?? 5;
   }
 
   getRpcUrl() { return this.rpcUrl; }
@@ -110,6 +110,7 @@ export class Config {
   getPullLogsIntervalMs() { return this.pullLogsIntervalMs; }
   getDbPath() { return this.dbPath; }
   getAddresses() { return this.addresses; }
+  setAddresses(addresses: string[]) { this.addresses = addresses.map(a => a.toLowerCase()); }
   getTopics() { return this.topics; }
   getLogLevel() { return this.logLevel; }
   getLogPretty() { return this.logPretty; }
@@ -124,4 +125,5 @@ export class Config {
     };
   }
   getLatestBlockStrategy() { return this.latestBlockStrategy; }
+  getAddressesBatchSize() { return this.addressesBatchSize; }
 }

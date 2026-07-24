@@ -10,6 +10,8 @@ export type LogEvent = {
   id: number;
   blockNumber: number;
   txHash: string;
+  logIndex: number;
+  txIndex: number;
   address: string;
   topics: string[];
   data: string;
@@ -19,8 +21,10 @@ export type ReceiptLog = {
   address: string;
   topics: string[];
   data: string;
-  blockNum: number;
+  blockNumber: number;
   txHash: string;
+  logIndex: number;
+  txIndex: number;
 };
 
 export enum BlockNumberType {

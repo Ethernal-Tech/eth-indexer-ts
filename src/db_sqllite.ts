@@ -39,17 +39,19 @@ export class SqliteDatabase implements IDatabase {
         tx_hash STRING NOT NULL,
         address TEXT NOT NULL,
         topics TEXT NOT NULL,
-        data TEXT NOT NULL
+        data TEXT NOT NULL,
+        log_index INTEGER NOT NULL,
+        tx_index INTEGER NOT NULL
       );
     `);
 
     const setLastProcessedBlockStmt = this.db.prepare(
       'INSERT OR REPLACE INTO last_processed_block(id, number) VALUES(1, ?)');
     const insertEventStmt = this.db.prepare(
-      'INSERT OR IGNORE INTO events(block_number, tx_hash, address, topics, data) VALUES (?,?,?,?,?)');
+      'INSERT OR IGNORE INTO events(block_number, tx_hash, address, topics, data, log_index, tx_index) VALUES (?,?,?,?,?,?,?)');
     this.txInsertEventsAndSetLastProcessedBlock = this.db.transaction((events: LogEvent[], blockNumber: number) => {
       for (const e of events) {
-        insertEventStmt.run(e.blockNumber, e.txHash, e.address, e.topics.join(','), e.data);
+        insertEventStmt.run(e.blockNumber, e.txHash, e.address, e.topics.join(','), e.data, e.logIndex, e.txIndex);
       }
 
       setLastProcessedBlockStmt.run(blockNumber);
@@ -131,6 +133,8 @@ export class SqliteDatabase implements IDatabase {
       address: row.address,
       topics: row.topics.split(','),
       data: row.data,
+      logIndex: row.log_index,
+      txIndex: row.tx_index,
     };
   }
 }

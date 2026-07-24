@@ -19,14 +19,22 @@ function makeBlock(number: number): Block {
   return { number, hash: `hash${number}`, parentHash: `hash${number - 1}`, timestamp: 0, txHashes: [] };
 }
 
-function makeReceiptLog(address: string, topic0: string, txHash = '0xff', blockNum = 1): ReceiptLog {
-  return { address, topics: [topic0], data: '0x', txHash, blockNum };
+function makeReceiptLog(
+  address: string,
+  topic0: string,
+  txHash = '0xff',
+  blockNumber = 1,
+  logIndex = 0,
+  txIndex = 0,
+): ReceiptLog {
+  return { address, topics: [topic0], data: '0x', txHash, blockNumber, logIndex, txIndex };
 }
 
 function makeConfig(overrides?: {
   maxBatchSize?: number;
   addresses?: string[];
   topics?: (string | string[])[] | undefined;
+  addressesBatchSize?: number;
 }): Config {
   return new Config({
     rpcUrl: 'http://localhost:8545',
@@ -39,6 +47,7 @@ function makeConfig(overrides?: {
     dbPath: ':memory:',
     addresses: overrides?.addresses ?? ['0xAAA'],
     topics: overrides?.topics,
+    addressesBatchSize: overrides?.addressesBatchSize,
   });
 }
 
@@ -70,9 +79,12 @@ class MockDB {
 }
 
 class MockLogsClient {
-  getLogs = vi.fn((_addresses: string[], _from: number, _to: number): Promise<ReceiptLog[]> =>
-    Promise.resolve([])
-  );
+  getLogs = vi.fn((
+    _from: number,
+    _to: number,
+    _addresses?: string[],
+    _topics?: (string | string[])[],
+  ): Promise<ReceiptLog[]> => Promise.resolve([]));
 }
 
 // ── tests ────────────────────────────────────────────────────────────────────
@@ -124,7 +136,7 @@ describe('LogsProcessor', () => {
     db.insertBlock(makeBlock(6));
     const processor = new LogsProcessor(makeConfig({ maxBatchSize: 10, addresses: ['0xBBB'] }), db as any, client, noopLogger);
     await processor.process();
-    expect(client.getLogs).toHaveBeenCalledWith(['0xbbb'], 5, 6);
+    expect(client.getLogs).toHaveBeenCalledWith(5, 6, ['0xbbb'], undefined);
   });
 
   it('saves logs and updates last processed block after each batch', async () => {
@@ -145,9 +157,9 @@ describe('LogsProcessor', () => {
     const processor = new LogsProcessor(makeConfig({ maxBatchSize: 2 }), db as any, client, noopLogger);
     await processor.process();
     expect(client.getLogs).toHaveBeenCalledTimes(3);
-    expect(client.getLogs).toHaveBeenNthCalledWith(1, expect.any(Array), 1, 2);
-    expect(client.getLogs).toHaveBeenNthCalledWith(2, expect.any(Array), 3, 4);
-    expect(client.getLogs).toHaveBeenNthCalledWith(3, expect.any(Array), 5, 5);
+    expect(client.getLogs).toHaveBeenNthCalledWith(1, 1, 2, expect.any(Array), undefined);
+    expect(client.getLogs).toHaveBeenNthCalledWith(2, 3, 4, expect.any(Array), undefined);
+    expect(client.getLogs).toHaveBeenNthCalledWith(3, 5, 5, expect.any(Array), undefined);
   });
 
   it('accumulates logs from all batches', async () => {
@@ -175,7 +187,7 @@ describe('LogsProcessor', () => {
     db.insertEventAndSetLastProcessedBlock([], 2); // blocks 1-2 already processed
     const processor = new LogsProcessor(makeConfig({ maxBatchSize: 10 }), db as any, client, noopLogger);
     await processor.process();
-    expect(client.getLogs).toHaveBeenCalledWith(expect.any(Array), 3, 4);
+    expect(client.getLogs).toHaveBeenCalledWith(3, 4, expect.any(Array), undefined);
     expect(client.getLogs).toHaveBeenCalledTimes(1);
   });
 
@@ -204,7 +216,19 @@ describe('LogsProcessor', () => {
     expect(result).toHaveLength(1);
   });
 
-  it('filters logs by topic when address matches', async () => {
+  it('forwards configured topics to getLogs', async () => {
+    db.insertBlock(makeBlock(1));
+    const processor = new LogsProcessor(
+      makeConfig({ addresses: ['0xAAA'], topics: [['0xMATCH']] }),
+      db as any,
+      client,
+      noopLogger
+    );
+    await processor.process();
+    expect(client.getLogs).toHaveBeenCalledWith(1, 1, ['0xaaa'], [['0xMATCH']]);
+  });
+
+  it('does not filter locally - the node applies the topic filter', async () => {
     db.insertBlock(makeBlock(1));
     client.getLogs = vi.fn(() =>
       Promise.resolve([
@@ -219,11 +243,11 @@ describe('LogsProcessor', () => {
       noopLogger
     );
     const result = await processor.process();
-    expect(result).toHaveLength(1);
-    expect(result![0].topics[0]).toBe('0xMATCH');
+    // whatever the client returns is stored as-is
+    expect(result).toHaveLength(2);
   });
 
-  it('passes logs through when address is not in the configured address list (idx === -1)', async () => {
+  it('stores logs regardless of which address they came from', async () => {
     db.insertBlock(makeBlock(1));
     client.getLogs = vi.fn(() =>
       Promise.resolve([makeReceiptLog('0xUNKNOWN', '0xANYTOPIC')])
@@ -239,6 +263,73 @@ describe('LogsProcessor', () => {
   });
 
 
+
+  // ── address batching ───────────────────────────────────────────────────────
+
+  it('splits addresses into batches of addressesBatchSize', async () => {
+    db.insertBlock(makeBlock(1));
+    const processor = new LogsProcessor(
+      makeConfig({ addresses: ['0xA', '0xB', '0xC', '0xD', '0xE'], addressesBatchSize: 2 }),
+      db as any,
+      client,
+      noopLogger
+    );
+    await processor.process();
+    // 5 addresses / batch of 2 => 3 calls
+    expect(client.getLogs).toHaveBeenCalledTimes(3);
+    expect(client.getLogs).toHaveBeenNthCalledWith(1, 1, 1, ['0xa', '0xb'], undefined);
+    expect(client.getLogs).toHaveBeenNthCalledWith(2, 1, 1, ['0xc', '0xd'], undefined);
+    expect(client.getLogs).toHaveBeenNthCalledWith(3, 1, 1, ['0xe'], undefined);
+  });
+
+  it('makes a single address-less call when no addresses are configured', async () => {
+    db.insertBlock(makeBlock(1));
+    const processor = new LogsProcessor(
+      makeConfig({ addresses: [], topics: [['0xTOPIC']] }),
+      db as any,
+      client,
+      noopLogger
+    );
+    await processor.process();
+    expect(client.getLogs).toHaveBeenCalledTimes(1);
+    // address is omitted entirely (undefined), not sent as an empty array
+    expect(client.getLogs).toHaveBeenCalledWith(1, 1, undefined, [['0xTOPIC']]);
+  });
+
+  it('merges logs from all address batches', async () => {
+    db.insertBlock(makeBlock(1));
+    client.getLogs = vi.fn((_from: number, _to: number, addresses?: string[]) =>
+      Promise.resolve([makeReceiptLog(addresses![0], '0xTOPIC')])
+    );
+    const processor = new LogsProcessor(
+      makeConfig({ addresses: ['0xA', '0xB', '0xC'], addressesBatchSize: 1 }),
+      db as any,
+      client,
+      noopLogger
+    );
+    const result = await processor.process();
+    expect(client.getLogs).toHaveBeenCalledTimes(3);
+    expect(result).toHaveLength(3);
+    expect(result!.map(r => r.address).sort()).toEqual(['0xa', '0xb', '0xc']);
+  });
+
+  // ── runtime address updates ────────────────────────────────────────────────
+
+  it('picks up addresses updated via setAddresses on the next process() call', async () => {
+    db.insertBlock(makeBlock(1));
+    const config = makeConfig({ addresses: ['0xAAA'], addressesBatchSize: 10 });
+    const processor = new LogsProcessor(config, db as any, client, noopLogger);
+
+    await processor.process();
+    expect(client.getLogs).toHaveBeenNthCalledWith(1, 1, 1, ['0xaaa'], undefined);
+
+    // new address added from outside, and a new block arrives
+    config.setAddresses(['0xAAA', '0xBBB']);
+    db.insertBlock(makeBlock(2));
+
+    await processor.process();
+    expect(client.getLogs).toHaveBeenNthCalledWith(2, 2, 2, ['0xaaa', '0xbbb'], undefined);
+  });
 
   // ── empty log list from client ─────────────────────────────────────────────
 

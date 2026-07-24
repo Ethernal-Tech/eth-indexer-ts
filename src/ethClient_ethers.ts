@@ -24,9 +24,9 @@ export class EthersEthClient implements IEthClient {
   }
 
   async getLogs(
-    address: string[],
     fromBlock: number,
     toBlock: number,
+    address?: string[],
     topics?: (string | string[])[],
   ): Promise<ReceiptLog[]> {
     const logs = await this.provider.getLogs({
@@ -41,7 +41,8 @@ export class EthersEthClient implements IEthClient {
       data: l.data,
       txIndex: l.transactionIndex,
       txHash: l.transactionHash,
-      blockNum: l.blockNumber,
+      blockNumber: l.blockNumber,
+      logIndex: l.index,
     }));
   }
 }

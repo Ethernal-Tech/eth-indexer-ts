@@ -27,29 +27,27 @@ export class LogsProcessor {
     for (let blockNum = fromBlock; blockNum <= toBlock; blockNum += this.config.getMaxBatchSize()) {
       const batchTo = Math.min(blockNum + this.config.getMaxBatchSize() - 1, toBlock);
 
-      this.logger.info({ fromBlock, toBlock: batchTo }, 'Processing logs for blocks');
+      this.logger.info({ fromBlock: blockNum, toBlock: batchTo }, 'Processing logs for blocks');
 
-      const logs = await this.client.getLogs(
-        this.config.getAddresses(), blockNum, batchTo);
-      const dbLogs = logs
-        .map((log) => ({
-          blockNumber: log.blockNum,
-          txHash: log.txHash,          
-          address: log.address,
-          topics: log.topics,
-          data: log.data,
-        } as LogEvent))
-        .filter(x => {
-          if (!this.config.getTopics()?.length) {
-            return true;
-          }
+      const addressBatches = this.chunkAddresses(
+        this.config.getAddresses(), this.config.getAddressesBatchSize());
 
-          const idx = (this.config.getAddresses() || []).findIndex((y) => x.address.toLowerCase() === y.toLowerCase());
-          if (idx === -1 || idx >= this.config.getTopics()!.length) {
-            return true;
-          }
-          return this.config.getTopics()![idx].includes(x.topics[0]);
-        });
+      const batchResults = await Promise.all(
+        addressBatches.map(async (addresses) => {
+          const logs = await this.client.getLogs(blockNum, batchTo, addresses, this.config.getTopics());
+          return logs.map((log) => ({
+            blockNumber: log.blockNumber,
+            logIndex: log.logIndex,
+            txIndex: log.txIndex,
+            txHash: log.txHash,          
+            address: log.address,
+            topics: log.topics,
+            data: log.data,
+          } as LogEvent))
+        }),
+      );
+
+      const dbLogs = batchResults.flat();
       // save to db
       this.db.insertEventAndSetLastProcessedBlock(dbLogs, batchTo);
 
@@ -57,5 +55,20 @@ export class LogsProcessor {
     }
 
     return newLogs;
+  }
+
+  private chunkAddresses(addresses: string[], size: number): (string[] | undefined)[] {
+    // No addresses => one address-less query (filter by topics only).
+    if (!addresses.length) {
+      return [undefined];
+    }
+
+    const step = Math.max(1, size);
+    const batches: string[][] = [];
+    for (let i = 0; i < addresses.length; i += step) {
+      batches.push(addresses.slice(i, i + step));
+    }
+
+    return batches;
   }
 }

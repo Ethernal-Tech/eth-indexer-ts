@@ -7,9 +7,9 @@ export interface IEthBlocksClient {
 
 export interface IEthLogsClient {
   getLogs(
-    address: string[],
     fromBlock: number,
     toBlock: number,
+    address?: string[],
     topics?: (string | string[])[],
   ): Promise<ReceiptLog[]>;
 }
