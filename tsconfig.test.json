@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": {
+    "noEmit": true,
+    "rootDir": ".",
+    // Tests and examples run under Node, not the ES2020 target the package ships.
+    "lib": ["ES2022"]
+  },
+  "include": [
+    "src/**/*.ts",
+    "test/**/*.ts",
+    "examples/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
+}

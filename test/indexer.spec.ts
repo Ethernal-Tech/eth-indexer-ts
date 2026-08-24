@@ -26,7 +26,6 @@ const noopLogger: ILogger = {
 
 function makeConfig(): Config {
   return new Config({
-    rpcUrl: 'http://localhost:8545',
     startBlockNumber: 0,
     confirmationBlocksCount: 12,
     maxBatchSize: 10,
@@ -34,7 +33,6 @@ function makeConfig(): Config {
     pullBlockIntervalMs: 0,
     pullBlocksLoopIntervalMs: 0,
     pullLogsIntervalMs: 0,
-    dbPath: ':memory:',
     addresses: ['0xAAA'],
     topics: undefined,
   });
@@ -59,7 +57,16 @@ class MockClient {
 }
 
 function makeSampleLogs(): LogEvent[] {
-  return [{ id: 1, blockNumber: 1, logIndex: 0, address: '0xAAA', topics: ['0x01'], data: '0x' }];
+  return [{
+    id: 1,
+    blockNumber: 1,
+    txHash: '0xtx1',
+    logIndex: 0,
+    txIndex: 0,
+    address: '0xAAA',
+    topics: ['0x01'],
+    data: '0x',
+  }];
 }
 
 // ── test setup ────────────────────────────────────────────────────────────────

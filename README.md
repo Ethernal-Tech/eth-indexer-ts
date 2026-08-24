@@ -22,7 +22,9 @@ npm install ethereum-indexer-ts
 
 ```typescript
 import 'dotenv/config'; // load .env before constructing Config
+import { JsonRpcProvider } from 'ethers';
 import {
+  BlockNumberType,
   Indexer,
   Config,
   PinoLogger,
@@ -31,12 +33,12 @@ import {
 } from 'ethereum-indexer-ts';
 
 const config = new Config();
-const logger = new PinoLogger(config.getLoggerOptions());
+const logger = new PinoLogger({ level: 'info', pretty: true });
 
 const indexer = new Indexer(
   config,
-  new EthersEthClient(config.getRpcUrl()),
-  new SqliteDatabase(config.getDbPath()),
+  new EthersEthClient(new JsonRpcProvider(process.env.RPC_URL), BlockNumberType.Finalized),
+  new SqliteDatabase('./indexer.db'),
   logger,
   async (db) => {
     // optional callback — called after each batch of logs is confirmed
@@ -53,7 +55,42 @@ await indexer.init();
 await indexer.start();
 ```
 
-> **Note:** `Config` reads from `process.env`. Call `dotenv.config()` (or `import 'dotenv/config'`) **before** constructing `Config` if you use a `.env` file.
+`Config` holds only the indexing options.
+
+> **Note:** `Config` reads its own options from `process.env`. Call `dotenv.config()` (or `import 'dotenv/config'`) **before** constructing `Config` if you use a `.env` file.
+
+### Providers
+
+`EthersEthClient` takes an ethers provider, not a URL, so any `AbstractProvider` works:
+
+```typescript
+import { FallbackProvider, JsonRpcProvider, WebSocketProvider } from 'ethers';
+
+new EthersEthClient(new WebSocketProvider(wsUrl), BlockNumberType.Safe);
+
+// several endpoints with automatic failover
+new EthersEthClient(
+  new FallbackProvider([new JsonRpcProvider(urlA), new JsonRpcProvider(urlB)]),
+  BlockNumberType.Safe,
+);
+```
+
+The provider is yours to close — the indexer never does. With `WebSocketProvider`, call
+`provider.destroy()` on shutdown. Install `ethers` in your own project: `npm install ethers`.
+
+### Choosing a block strategy
+
+`EthersEthClient` requires a `BlockNumberType` — there is no default, because the choice
+decides how much reorg exposure you accept:
+
+| Value | Meaning |
+|---|---|
+| `BlockNumberType.Latest` | Newest block. Lowest latency, most reorg-prone |
+| `BlockNumberType.Safe` | Safe head — reorg is unlikely but possible |
+| `BlockNumberType.Finalized` | Finalized head. Highest latency, cannot be reorged |
+
+`Safe` and `Finalized` require RPC provider support. Reorgs are handled regardless — see
+`CONFIRMATION_BLOCKS_COUNT` — but a more conservative strategy means fewer rollbacks to handle.
 
 ### Event shape
 
@@ -74,28 +111,40 @@ type LogEvent = {
 
 ## Configuration
 
-All options are set via environment variables:
+### Read by `Config`
 
-| Variable | Required | Default | Description |
-|---|---|---|---|
-| `RPC_URL` | ✅ | — | WebSocket or HTTP RPC endpoint |
-| `START_BLOCK_NUMBER` | ✅ | — | Block number to start indexing from |
-| `ADDRESSES` | | — | Comma-separated contract addresses to watch. Leave unset to index **every** contract, filtered by `TOPICS` alone — see [Filtering](#filtering) |
-| `TOPICS` | | — | Topic filters applied **positionally** (`topic0,topic1,…`); use `\|` for OR within a position. Passed straight to `eth_getLogs` |
-| `ADDRESSES_BATCH_SIZE` | | `5` | Max addresses per `eth_getLogs` request. Longer address lists are split into batches fetched in parallel |
-| `CONFIRMATION_BLOCKS_COUNT` | | `8` | Blocks required before a block is considered confirmed |
-| `MAX_BATCH_SIZE` | | `40` | Max blocks fetched per log-polling batch |
-| `PULL_BLOCK_INTERVAL_MS` | | `3000` | Interval between new-block polls (ms) |
-| `PULL_BLOCKS_LOOP_INTERVAL_MS` | | `250` | Interval between block-processing loop ticks (ms) |
-| `PULL_LOGS_INTERVAL_MS` | | `4000` | Interval between log-fetching polls (ms) |
-| `LATEST_BLOCK_STRATEGY` | | `latest` | Strategy for determining the latest block: `latest` (default), `safe`, or `finalized` (if supported by your RPC provider). |
-| `DB_PATH` | | `./indexer.db` | SQLite database file path |
-| `LOG_LEVEL` | | `info` | Pino log level: `trace` \| `debug` \| `info` \| `warn` \| `error` \| `fatal` |
-| `LOG_PRETTY` | | `false` | `true` for human-readable output, `false` for JSON |
-| `LOG_FILE` | | — | File path for log rotation sink (stdout always active). Supports date tokens, e.g. `./logs/app.%Y-%m-%d.log` |
-| `LOG_FILE_SIZE` | | — | Rotate when file exceeds this size, e.g. `10m`, `100m` |
-| `LOG_FILE_FREQUENCY` | | — | Time-based rotation: `daily` \| `hourly` |
-| `LOG_FILE_MAX_FILES` | | `0` (unlimited) | Max number of rotated files to keep |
+`new Config()` with no arguments reads these from `process.env`. Pass a params object instead
+to set them explicitly and skip the environment entirely.
+
+| Variable | Default | Description |
+|---|---|---|
+| `START_BLOCK_NUMBER` | `0` | Block number to start indexing from |
+| `ADDRESSES` | — | Comma-separated contract addresses to watch. Leave unset to index **every** contract, filtered by `TOPICS` alone — see [Filtering](#filtering) |
+| `TOPICS` | — | Topic filters applied **positionally** (`topic0,topic1,…`); use `\|` for OR within a position. Passed straight to `eth_getLogs` |
+| `ADDRESSES_BATCH_SIZE` | `5` | Max addresses per `eth_getLogs` request. Longer address lists are split into batches fetched in parallel |
+| `CONFIRMATION_BLOCKS_COUNT` | `12` | Blocks required before a block is considered confirmed |
+| `MAX_BATCH_SIZE` | `10` | Max blocks fetched per log-polling batch |
+| `PULL_BLOCK_INTERVAL_MS` | `3000` | Interval between new-block polls (ms) |
+| `PULL_BLOCKS_LOOP_INTERVAL_MS` | `500` | Interval between block-processing loop ticks (ms) |
+| `PULL_LOGS_INTERVAL_MS` | `4000` | Interval between log-fetching polls (ms) |
+
+### Wired by your application
+
+These are **not** read by the library — they are constructor arguments you supply. The names
+below are what [`examples/basic.ts`](examples/basic.ts) happens to call them; your application
+can source these values however it likes.
+
+| Value | Passed to | Description |
+|---|---|---|
+| ethers provider | `EthersEthClient` | Any `AbstractProvider` — see [Providers](#providers) |
+| Block strategy | `EthersEthClient` | `BlockNumberType.Latest` \| `.Safe` \| `.Finalized` — required, no default |
+| Database path | `SqliteDatabase` | SQLite database file path |
+| `level` | `PinoLogger` | Pino log level: `trace` \| `debug` \| `info` \| `warn` \| `error` \| `fatal` |
+| `pretty` | `PinoLogger` | `true` for human-readable output, `false` for JSON |
+| `file` | `PinoLogger` | File path for log rotation sink (stdout always active). Supports date tokens, e.g. `./logs/app.%Y-%m-%d.log` |
+| `fileSize` | `PinoLogger` | Rotate when file exceeds this size, e.g. `10m`, `100m` |
+| `fileFrequency` | `PinoLogger` | Time-based rotation: `daily` \| `hourly` |
+| `fileMaxFiles` | `PinoLogger` | Max number of rotated files to keep (`0` = unlimited) |
 
 
 ## Filtering
@@ -140,10 +189,15 @@ When `ADDRESSES` is longer than `ADDRESSES_BATCH_SIZE`, the list is split into c
 `Config` is read fresh on every polling tick, so the watched address list can be changed while the indexer is running:
 
 ```typescript
-config.setAddresses([...config.getAddresses(), '0xNewContract']);
+config.setAddresses([...config.getAddresses(), '0xnewcontract...']);
 ```
 
 The next log-polling tick picks up the new list automatically — no restart required.
+
+> **Casing:** `setAddresses` stores what you give it, unchanged. Pass lower-case addresses —
+> that is what the `ADDRESSES` env var is normalized to when `Config` parses it, so mixing the
+> two sources otherwise leaves the list inconsistent. Note that `LogEvent.address` comes back
+> **checksummed** from the node, so lower-case it before comparing against your own records.
 
 > **Note:** newly added addresses are indexed **going forward only**. The indexer tracks a single last-processed-block cursor, so events emitted by a new address in already-processed blocks are not backfilled. To capture history, re-index from an earlier `START_BLOCK_NUMBER` with a fresh database.
 
@@ -172,18 +226,27 @@ The repository includes a runnable example at [`examples/basic.ts`](examples/bas
 1. Create a `.env` file in the project root (see [Configuration](#configuration) for all variables):
 
 ```
-RPC_URL=https://rpc.nexus.testnet.apexfusion.org
+# read by Config
 START_BLOCK_NUMBER=12444887
 CONFIRMATION_BLOCKS_COUNT=8
 MAX_BATCH_SIZE=40
 PULL_BLOCK_INTERVAL_MS=3000
 PULL_BLOCKS_LOOP_INTERVAL_MS=250
 PULL_LOGS_INTERVAL_MS=4000
-DB_PATH=./indexer.db
-ADDRESSES=0x53F9124643E3D15f8d753733C5d908CD6aA65178
+ADDRESSES=0x53f9124643e3d15f8d753733c5d908cd6aa65178
 ADDRESSES_BATCH_SIZE=5
 TOPICS=0x5346f1615d0f5d79989c2d9c7deb07d6a9e52196a209ec7abfbebabb8d346a69
+
+# read by the example itself, not by the library
+RPC_URL=https://rpc.nexus.testnet.apexfusion.org
+LATEST_BLOCK_STRATEGY=latest
+DB_PATH=./indexer.db
+LOG_LEVEL=info
+LOG_PRETTY=true
 ```
+
+The example parses `LATEST_BLOCK_STRATEGY` with `envEnum`, so an unrecognized value fails at
+startup rather than surfacing as an RPC error mid-run. Omit it to get `latest`.
 
 2. Start the example (auto-restarts on file changes):
 
@@ -199,6 +262,14 @@ The `start-example` script runs `examples/basic.ts` directly via [`tsx`](https:/
 
 ```bash
 npm run build
+```
+
+### Typecheck
+
+`npm run build` compiles `src` only. To typecheck the tests and examples too:
+
+```bash
+npm run typecheck
 ```
 
 ## Tests

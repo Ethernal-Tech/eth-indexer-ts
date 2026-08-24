@@ -37,14 +37,12 @@ function makeConfig(overrides?: {
   addressesBatchSize?: number;
 }): Config {
   return new Config({
-    rpcUrl: 'http://localhost:8545',
     startBlockNumber: 0,
     confirmationBlocksCount: 12,
     maxBatchSize: overrides?.maxBatchSize ?? 10,
     pullBlockIntervalMs: 0,
     pullBlocksLoopIntervalMs: 0,
     pullLogsIntervalMs: 0,
-    dbPath: ':memory:',
     addresses: overrides?.addresses ?? ['0xAAA'],
     topics: overrides?.topics,
     addressesBatchSize: overrides?.addressesBatchSize,
@@ -324,11 +322,21 @@ describe('LogsProcessor', () => {
     expect(client.getLogs).toHaveBeenNthCalledWith(1, 1, 1, ['0xaaa'], undefined);
 
     // new address added from outside, and a new block arrives
-    config.setAddresses(['0xAAA', '0xBBB']);
+    config.setAddresses(['0xaaa', '0xbbb']);
     db.insertBlock(makeBlock(2));
 
     await processor.process();
     expect(client.getLogs).toHaveBeenNthCalledWith(2, 2, 2, ['0xaaa', '0xbbb'], undefined);
+  });
+
+  it('passes setAddresses values through untouched — the caller owns the casing', async () => {
+    db.insertBlock(makeBlock(1));
+    const config = makeConfig({ addresses: ['0xAAA'], addressesBatchSize: 10 });
+    const processor = new LogsProcessor(config, db as any, client, noopLogger);
+
+    config.setAddresses(['0xAaA']);
+    await processor.process();
+    expect(client.getLogs).toHaveBeenNthCalledWith(1, 1, 1, ['0xAaA'], undefined);
   });
 
   // ── empty log list from client ─────────────────────────────────────────────

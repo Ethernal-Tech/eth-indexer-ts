@@ -1,10 +1,24 @@
 import pino from 'pino';
-import { ILogger, LoggerOptions } from './interfaces/logger';
+import { ILogger } from './interfaces/logger';
+
+export type PinoLoggerOptions = {  
+  level: string;
+  /** Write human-readable output to stdout (default: false → JSON) */
+  pretty: boolean;
+  /** Path to log file. Supports date tokens, e.g. ./logs/app.%Y-%m-%d.log */
+  file?: string;
+  /** Max file size before rotation, e.g. '10m', '100m' (pino-roll syntax) */
+  fileSize?: string;
+  /** Rotation frequency: 'daily' | 'hourly' (pino-roll syntax) */
+  fileFrequency?: 'daily' | 'hourly';
+  /** Max number of rotated files to keep (0 = unlimited) */
+  fileMaxFiles?: number;
+}
 
 export class PinoLogger implements ILogger {
   private readonly logger: pino.Logger;
 
-  constructor(opts: LoggerOptions) {
+  constructor(opts: PinoLoggerOptions) {
     const targets: pino.TransportTargetOptions[] = [];
 
     // stdout — always present, pretty or plain JSON

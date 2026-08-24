@@ -6,10 +6,10 @@ export { Config } from './config';
 // ── Default implementations ───────────────────────────────────────────────────
 export { SqliteDatabase } from './db_sqllite';
 export { EthersEthClient } from './ethClient_ethers';
-export { PinoLogger } from './logger_pino';
+export { PinoLogger, PinoLoggerOptions } from './logger_pino';
 
 // ── Interfaces ────────────────────────────────────────────────────────────────
-export type { ILogger, LoggerOptions } from './interfaces/logger';
+export type { ILogger } from './interfaces/logger';
 export type {
   IDatabase,
   IBlocksDatabase,
@@ -20,6 +20,7 @@ export type { IEthClient, IEthBlocksClient, IEthLogsClient } from './interfaces/
 
 // ── Data types ────────────────────────────────────────────────────────────────
 export type { Block, LogEvent, ReceiptLog } from './common/data';
+export { BlockNumberType } from './common/data';
 
 // ── Errors ────────────────────────────────────────────────────────────────────
 export { IndexerError, FatalIndexerError } from './common/errors';

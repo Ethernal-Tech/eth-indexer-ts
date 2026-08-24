@@ -1,15 +1,13 @@
-import { JsonRpcProvider } from 'ethers';
-import { Block as EthersBlock } from 'ethers';
+import { AbstractProvider, Block as EthersBlock, Log } from 'ethers';
 import { Block, BlockNumberType, ReceiptLog } from './common/data';
 import { IEthClient } from './interfaces/ethClient';
-import { Log } from 'ethers';
 
 export class EthersEthClient implements IEthClient {
-  private readonly provider: JsonRpcProvider;
+  private readonly provider: AbstractProvider;
   private readonly latestBlockStrategy: BlockNumberType;
 
-  constructor(rpcUrl: string, latestBlockStrategy: BlockNumberType) {
-    this.provider = new JsonRpcProvider(rpcUrl);
+  constructor(provider: AbstractProvider, latestBlockStrategy: BlockNumberType) {
+    this.provider = provider;
     this.latestBlockStrategy = latestBlockStrategy;
   }
 
