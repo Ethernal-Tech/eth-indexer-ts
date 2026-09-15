@@ -60,7 +60,9 @@ export class SqliteDatabase implements IDatabase {
 
   insertBlock(block: Block) {
     const txHashes = block.txHashes?.length ? block.txHashes.join(',') : null;
-    const stmt = this.db.prepare('INSERT INTO blocks(number, hash, parent_hash, timestamp, tx_hashes) VALUES(?,?,?,?,?)');
+    // OR REPLACE: a chain restart replays heights the table already holds, and a
+    // plain INSERT would fail the primary key and stall block confirmation
+    const stmt = this.db.prepare('INSERT OR REPLACE INTO blocks(number, hash, parent_hash, timestamp, tx_hashes) VALUES(?,?,?,?,?)');
     stmt.run(block.number, block.hash, block.parentHash, block.timestamp, txHashes);
   }
 

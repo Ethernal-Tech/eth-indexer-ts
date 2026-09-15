@@ -203,7 +203,14 @@ export class BlockContainer {
     }
     // retrieve the oldest block in buffer, which is the one that got confirmed, and save it to database
     const confirmedBlock = this.blocksBuffer.peek()!;
-    this.db.insertBlock(confirmedBlock);
+    try {
+      this.db.insertBlock(confirmedBlock);
+    } catch (e) {
+      // undo the push: only this method drains the buffer, so leaving it full
+      // would make every later addBlock throw 'buffer is full' forever
+      this.blocksBuffer.popNewest();
+      throw e;
+    }
     this.latestConfirmedBlock = confirmedBlock;
     this.blocksBuffer.pop(); // remove confirmed block from buffer
     this.logger.info({ number: confirmedBlock.number, hash: confirmedBlock.hash }, 'Confirmed block');

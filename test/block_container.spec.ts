@@ -435,6 +435,26 @@ describe('BlockContainer - full coverage', () => {
     await expect(container.process()).rejects.toThrow(IndexerError);
   });
 
+  it('should keep confirming blocks after a failed insert instead of wedging the buffer', async () => {
+    db.insertBlock(makeBlock(1, 'hash1'));
+    container = mkContainer(2, 0);
+    await container.init();
+
+    // One failing write, the way a primary key clash on a replayed height does
+    const failOnce = vi.spyOn(db, 'insertBlock').mockImplementationOnce(() => {
+      throw new Error('UNIQUE constraint failed: blocks.number');
+    });
+
+    client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(5, 'hash5', 'hash4')));
+    await expect(container.process()).rejects.toThrow('UNIQUE constraint failed');
+
+    // The buffer must have room again, so the next pass is not 'buffer is full'
+    failOnce.mockRestore();
+    client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(6, 'hash6', 'hash5')));
+    await expect(container.process()).resolves.toBe(true);
+    expect(container['latestConfirmedBlock']!.number).toBeGreaterThan(1);
+  });
+
   it('should throw FatalIndexerError when oldest backfilled block does not connect to confirmed block', async () => {
     // confirmed=block1(hash1), buffer empty
     // lastBlock=block3: block.number - latestInMemBlock.number = 3-1 = 2 = confirmationBlockCount → handleNewBlockFromLast
