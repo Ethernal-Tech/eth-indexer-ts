@@ -55,6 +55,12 @@ export class Indexer {
   }
 
   async start() {
+    // Starting twice would swap the controller the running loops abort on,
+    // leaving them waiting on a signal stop() no longer fires.
+    if (this.running) {
+      return;
+    }
+
     this.running = true;
     this.abortController = new AbortController();
     return Promise.all([this.blocksLoop(), this.logsLoop()]);
@@ -72,7 +78,7 @@ export class Indexer {
 
   private async logsLoop(): Promise<void> {
     return this.executeLoop('logs', this.config.getPullLogsIntervalMs(), async () => {
-      const newLogs = await this.logsProcessor.process();
+      const newLogs = await this.logsProcessor.process(this.abortController.signal);
       if (newLogs?.length && !!this.newLogCallback) {
         await this.newLogCallback(this.db, newLogs);
       }

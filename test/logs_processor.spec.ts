@@ -348,4 +348,46 @@ describe('LogsProcessor', () => {
     const result = await processor.process();
     expect(result).toEqual([]);
   });
+
+  // ── stopping part way through a catch-up ──────────────────────────────────
+
+  it('stops between batches once the signal aborts', async () => {
+    for (let i = 1; i <= 50; i++) db.insertBlock(makeBlock(i));
+    const controller = new AbortController();
+    client.getLogs = vi.fn(() => {
+      controller.abort();
+      return Promise.resolve([makeReceiptLog('0xAAA', '0xTOPIC1')]);
+    });
+
+    const processor = new LogsProcessor(
+      makeConfig({ maxBatchSize: 10 }), db as any, client, noopLogger);
+    const result = await processor.process(controller.signal);
+
+    // 50 blocks in batches of 10 would be 5 calls if it ran to the end
+    expect(client.getLogs).toHaveBeenCalledTimes(1);
+    // the batch that did finish still committed, so the rest resumes next run
+    expect(db.getLastProcessedBlock()).toBe(10);
+    expect(result).toHaveLength(1);
+  });
+
+  it('processes every batch when the signal never aborts', async () => {
+    for (let i = 1; i <= 50; i++) db.insertBlock(makeBlock(i));
+    const processor = new LogsProcessor(
+      makeConfig({ maxBatchSize: 10 }), db as any, client, noopLogger);
+
+    await processor.process(new AbortController().signal);
+
+    expect(client.getLogs).toHaveBeenCalledTimes(5);
+    expect(db.getLastProcessedBlock()).toBe(50);
+  });
+
+  it('processes every batch when no signal is given at all', async () => {
+    for (let i = 1; i <= 50; i++) db.insertBlock(makeBlock(i));
+    const processor = new LogsProcessor(
+      makeConfig({ maxBatchSize: 10 }), db as any, client, noopLogger);
+
+    await processor.process();
+
+    expect(client.getLogs).toHaveBeenCalledTimes(5);
+  });
 });
