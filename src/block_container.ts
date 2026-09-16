@@ -51,7 +51,8 @@ export class BlockContainer {
     }
   }
 
-  async process(): Promise<boolean> {
+  /** `signal` lets a long backfill give up instead of waiting out every block's throttle. */
+  async process(signal?: AbortSignal): Promise<boolean> {
     const block = await this.client.getLatestBlock();
     if (!block) {
       return false;
@@ -92,10 +93,10 @@ export class BlockContainer {
     if (latestInMemBlock && latestInMemBlock!.number + 1 < block.number) {
       if (block.number - latestInMemBlock!.number > this.confirmationBlockCount) {
         // synchronize from beggining of the buffer, which is safe height
-        return await this.handleNewBlockFromFirst(block);
+        return await this.handleNewBlockFromFirst(block, signal);
       }
       // synchronize from latest confirmed block, which is safe height
-      return await this.handleNewBlockFromLast(block);
+      return await this.handleNewBlockFromLast(block, signal);
     }
 
     // check block against blocks already in unconfirmed blocks buffer
@@ -112,7 +113,7 @@ export class BlockContainer {
     return this.addBlock(block);
   }
 
-  private async handleNewBlockFromFirst(lastBlock: Block): Promise<boolean> {
+  private async handleNewBlockFromFirst(lastBlock: Block, signal?: AbortSignal): Promise<boolean> {
     let hasNewConfirmedBlock = false;
     let currentBlock = this.getLatestBlock();
     const startBlockNumber = currentBlock ? currentBlock.number + 1 : 0;
@@ -133,7 +134,11 @@ export class BlockContainer {
       hasNewConfirmedBlock ||= nb;
       currentBlock = block;
 
-      await sleep(this.pullBlocksLoopIntervalMs);
+      await sleep(this.pullBlocksLoopIntervalMs, signal);
+      if (signal?.aborted) {
+        // lastBlock is not added, so the buffer keeps no gap - the next run re-reads from here
+        return hasNewConfirmedBlock;
+      }
     }
 
     if (currentBlock!.hash !== lastBlock.parentHash) {
@@ -147,7 +152,7 @@ export class BlockContainer {
     return hasNewConfirmedBlock || nb;
   }
 
-  private async handleNewBlockFromLast(lastBlock: Block): Promise<boolean> {
+  private async handleNewBlockFromLast(lastBlock: Block, signal?: AbortSignal): Promise<boolean> {
     const lowestBlockNum = this.latestConfirmedBlock ? this.latestConfirmedBlock.number + 1 : 0;
     const blocks = [lastBlock];
     for (let i = lastBlock.number - 1; i >= lowestBlockNum; i--) {
@@ -175,7 +180,11 @@ export class BlockContainer {
 
       blocks.push(block);
 
-      await sleep(this.pullBlocksLoopIntervalMs);
+      await sleep(this.pullBlocksLoopIntervalMs, signal);
+      if (signal?.aborted) {
+        // the lower half is still missing, and a partial range would leave a gap
+        return false;
+      }
     }
     // if there are blocks in array, check if first one number is +1 of latest confirmed block 
     // and if hashes do not match throw fatal error, because it means that we have a fork on confirmed block

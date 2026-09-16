@@ -455,6 +455,23 @@ describe('BlockContainer - full coverage', () => {
     expect(container['latestConfirmedBlock']!.number).toBeGreaterThan(1);
   });
 
+  it('should abandon a backfill as soon as the signal aborts', async () => {
+    db.insertBlock(makeBlock(1, 'hash1'));
+    // 50ms per block, so 40 blocks would take 2s if the throttle were not cut short
+    container = new BlockContainer(db, client, 2, 0, 50, noopLogger);
+    await container.init();
+
+    const controller = new AbortController();
+    client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(41, 'hash41', 'hash40')));
+    setTimeout(() => controller.abort(), 20);
+
+    const started = Date.now();
+    await container.process(controller.signal);
+    expect(Date.now() - started).toBeLessThan(500);
+    // the final block is never added, so the buffer is left without a gap
+    expect(container['blocksBuffer'].find((b: any) => b.number === 41)[0]).toBe(-1);
+  });
+
   it('should throw FatalIndexerError when oldest backfilled block does not connect to confirmed block', async () => {
     // confirmed=block1(hash1), buffer empty
     // lastBlock=block3: block.number - latestInMemBlock.number = 3-1 = 2 = confirmationBlockCount → handleNewBlockFromLast
