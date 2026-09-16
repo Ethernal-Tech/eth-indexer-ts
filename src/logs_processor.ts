@@ -13,7 +13,7 @@ export class LogsProcessor {
   ) {
   }
 
-  async process(): Promise<LogEvent[] | undefined> {
+  async process(signal?: AbortSignal): Promise<LogEvent[] | undefined> {
     const lastProccesedBlock = this.db.getLastProcessedBlock() ?? -1;
     const unprocessedBlocks = this.db.getBlocks(lastProccesedBlock + 1);
     if (!unprocessedBlocks.length) {
@@ -25,6 +25,11 @@ export class LogsProcessor {
     const newLogs = [];
 
     for (let blockNum = fromBlock; blockNum <= toBlock; blockNum += this.config.getMaxBatchSize()) {
+      // each batch commits its own cursor, so whatever is left resumes next run
+      if (signal?.aborted) {
+        break;
+      }
+
       const batchTo = Math.min(blockNum + this.config.getMaxBatchSize() - 1, toBlock);
 
       this.logger.info({ fromBlock: blockNum, toBlock: batchTo }, 'Processing logs for blocks');

@@ -188,6 +188,85 @@ describe('Indexer', () => {
       indexer.stop();
       expect(indexer.isRunning()).toBe(false);
     });
+
+    it('aborts the signal handed to both loops', async () => {
+      const indexer = new Indexer(config, client, db, noopLogger);
+      let blocksSignal: AbortSignal | undefined;
+      let logsSignal: AbortSignal | undefined;
+      mockContainerProcess.mockImplementation(async (signal: AbortSignal) => {
+        blocksSignal = signal;
+        return false;
+      });
+      mockLogsProcess.mockImplementationOnce(async (signal: AbortSignal) => {
+        logsSignal = signal;
+        indexer.stop();
+        return undefined;
+      });
+
+      await indexer.start();
+
+      expect(blocksSignal?.aborted).toBe(true);
+      expect(logsSignal?.aborted).toBe(true);
+    });
+
+    it('cuts the poll wait short instead of sitting out the interval', async () => {
+      // both intervals real: a zero one spins on resolved promises and starves the timer below
+      const slowConfig = new Config({
+        startBlockNumber: 0,
+        confirmationBlocksCount: 12,
+        maxBatchSize: 10,
+        pullBlockIntervalMs: 10_000,
+        pullBlocksLoopIntervalMs: 0,
+        pullLogsIntervalMs: 10_000,
+        addresses: ['0xAAA'],
+        topics: undefined,
+      });
+      const indexer = new Indexer(slowConfig, client, db, noopLogger);
+      mockContainerProcess.mockImplementationOnce(async () => {
+        setTimeout(() => indexer.stop(), 20);
+        return false;
+      });
+
+      const started = Date.now();
+      await indexer.start();
+      expect(Date.now() - started).toBeLessThan(2_000);
+    });
+
+    it('ignores a second start() while already running', async () => {
+      const indexer = new Indexer(config, client, db, noopLogger);
+      const seen = new Set<AbortSignal>();
+      mockContainerProcess.mockImplementation(async (signal: AbortSignal) => {
+        seen.add(signal);
+        return false;
+      });
+
+      // the second call does not await the first, the way a double bootstrap would not
+      const first = indexer.start();
+      const second = indexer.start();
+      indexer.stop();
+      await Promise.all([first, second]);
+
+      // one controller only, so stop() reaches every loop that is running
+      expect(seen.size).toBe(1);
+      expect(await second).toBeUndefined();
+    });
+
+    it('re-arms the signal on restart, so a later stop() still works', async () => {
+      const indexer = new Indexer(config, client, db, noopLogger);
+      const seen: AbortSignal[] = [];
+      mockContainerProcess.mockImplementation(async (signal: AbortSignal) => {
+        seen.push(signal);
+        indexer.stop();
+        return false;
+      });
+
+      await indexer.start();
+      await indexer.start();
+
+      // a controller is single use, so a restart must not reuse the aborted one
+      expect(seen[seen.length - 1]).not.toBe(seen[0]);
+      expect(seen[seen.length - 1].aborted).toBe(true);
+    });
   });
 
   // ── start() – loops run ───────────────────────────────────────────────────
