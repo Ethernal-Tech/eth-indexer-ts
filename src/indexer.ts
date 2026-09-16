@@ -19,6 +19,7 @@ export class Indexer {
   private readonly blocksContainer: BlockContainer;
   private readonly logsProcessor: LogsProcessor;
   private running = false;
+  private abortController = new AbortController();
 
   constructor(
     config: Config,
@@ -49,10 +50,13 @@ export class Indexer {
 
   stop() {
     this.running = false;
+    // wakes both loops out of their wait instead of letting them finish it
+    this.abortController.abort();
   }
 
   async start() {
     this.running = true;
+    this.abortController = new AbortController();
     return Promise.all([this.blocksLoop(), this.logsLoop()]);
   }
 
@@ -62,7 +66,7 @@ export class Indexer {
 
   private async blocksLoop(): Promise<void> {
     return this.executeLoop('blocks', this.config.getPullBlockIntervalMs(), async () => {
-      await this.blocksContainer.process();
+      await this.blocksContainer.process(this.abortController.signal);
     });
   }
 
@@ -96,7 +100,7 @@ export class Indexer {
         }
       }
 
-      await sleep(waitTimeMs);
+      await sleep(waitTimeMs, this.abortController.signal);
     }
 
     this.logger.info(`${name} loop has been stopped`);
