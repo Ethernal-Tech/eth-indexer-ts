@@ -1,4 +1,5 @@
-import { envInt } from './common/utils';
+import { IndexingMode } from './common/data';
+import { envEnum, envInt } from './common/utils';
 
 export class Config {
   private readonly startBlock: number | undefined;
@@ -9,6 +10,7 @@ export class Config {
   private readonly pullLogsIntervalMs: number;
   private readonly topics: (string | string[])[] | undefined;
   private readonly addressesBatchSize: number;
+  private readonly indexingMode: IndexingMode;
   private addresses: string[];
   
   constructor(params?: {
@@ -21,6 +23,7 @@ export class Config {
     addresses: string[];
     topics: (string | string[])[] | undefined;
     addressesBatchSize?: number;
+    indexingMode?: IndexingMode;
   }) {
     if (!params) {
       let topics: (string | string[])[] | undefined = undefined;
@@ -44,6 +47,7 @@ export class Config {
         pullBlocksLoopIntervalMs: envInt('PULL_BLOCKS_LOOP_INTERVAL_MS', 500),
         pullLogsIntervalMs: envInt('PULL_LOGS_INTERVAL_MS', 4000),
         addressesBatchSize: envInt('ADDRESSES_BATCH_SIZE', 5),
+        indexingMode: envEnum('INDEXING_MODE', IndexingMode, IndexingMode.BlockTracking),
       };
     }
 
@@ -56,6 +60,7 @@ export class Config {
     this.addresses = params.addresses.map(a => a.toLowerCase());
     this.topics = params.topics;
     this.addressesBatchSize = params.addressesBatchSize ?? 5;
+    this.indexingMode = params.indexingMode ?? IndexingMode.BlockTracking;
   }
 
   getStartBlockNumber() { return this.startBlock; }
@@ -67,6 +72,7 @@ export class Config {
   getTopics() { return this.topics; }
   getAddressesBatchSize() { return this.addressesBatchSize; }
   getAddresses() { return this.addresses; }
+  getIndexingMode() { return this.indexingMode; }
   // Stored as given — unlike the constructor, which normalizes the raw env input.
   // Callers own the casing here: pass lower case to match lower-cased log addresses.
   setAddresses(addresses: string[]) { this.addresses = addresses; }

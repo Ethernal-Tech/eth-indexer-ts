@@ -2,6 +2,11 @@
 export { Indexer } from './indexer';
 export type { NewLogCallback } from './indexer';
 export { Config } from './config';
+export {
+  createIndexingStrategy,
+  BlockTrackingStrategy,
+  ConfirmedRangeStrategy,
+} from './indexing_strategy';
 
 // ── Default implementations ───────────────────────────────────────────────────
 export { SqliteDatabase } from './db_sqllite';
@@ -17,10 +22,11 @@ export type {
   ISubscriberDatabase,
 } from './interfaces/database';
 export type { IEthClient, IEthBlocksClient, IEthLogsClient } from './interfaces/ethClient';
+export type { IIndexingStrategy, IndexerLoop } from './interfaces/indexing_strategy';
 
 // ── Data types ────────────────────────────────────────────────────────────────
 export type { Block, LogEvent, ReceiptLog } from './common/data';
-export { BlockNumberType } from './common/data';
+export { BlockNumberType, IndexingMode } from './common/data';
 
 // ── Errors ────────────────────────────────────────────────────────────────────
 export { IndexerError, FatalIndexerError } from './common/errors';

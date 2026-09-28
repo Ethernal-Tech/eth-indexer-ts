@@ -391,3 +391,34 @@ describe('LogsProcessor', () => {
     expect(client.getLogs).toHaveBeenCalledTimes(5);
   });
 });
+
+// ── processRange ─────────────────────────────────────────────────────────────
+
+describe('LogsProcessor.processRange', () => {
+  it('reports the last batch that committed', async () => {
+    const db = new MockDB();
+    const client = new MockLogsClient();
+    const processor = new LogsProcessor(makeConfig({ maxBatchSize: 4 }), db as any, client, noopLogger);
+
+    const result = await processor.processRange(3, 10);
+
+    expect(result.processedTo).toBe(10);
+    expect(await db.getLastProcessedBlock()).toBe(10);
+    expect(client.getLogs).toHaveBeenNthCalledWith(1, 3, 6, expect.any(Array), undefined);
+    expect(client.getLogs).toHaveBeenNthCalledWith(2, 7, 10, expect.any(Array), undefined);
+  });
+
+  it('reports null when aborted before anything committed', async () => {
+    const db = new MockDB();
+    const client = new MockLogsClient();
+    const processor = new LogsProcessor(makeConfig(), db as any, client, noopLogger);
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await processor.processRange(3, 10, controller.signal);
+
+    expect(result).toEqual({ logs: [], processedTo: null });
+    expect(client.getLogs).not.toHaveBeenCalled();
+    expect(await db.getLastProcessedBlock()).toBeNull();
+  });
+});

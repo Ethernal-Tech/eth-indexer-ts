@@ -621,4 +621,29 @@ describe('Indexer', () => {
       await indexer.start();
     });
   });
+
+  // ── custom strategy ───────────────────────────────────────────────────────
+
+  describe('custom strategy', () => {
+    it('drives the strategy passed in instead of the configured one', async () => {
+      const callback: NewLogCallback = vi.fn().mockResolvedValue(undefined);
+      const init = vi.fn().mockResolvedValue(undefined);
+      const run = vi.fn();
+      const indexer = new Indexer(config, client, db, noopLogger, callback, {
+        init,
+        loops: () => [{ name: 'custom', intervalMs: 0, run }],
+      });
+      run
+        .mockResolvedValueOnce(makeSampleLogs())
+        .mockImplementationOnce(async () => { indexer.stop(); return undefined; });
+
+      await indexer.init();
+      await indexer.start();
+
+      expect(init).toHaveBeenCalledOnce();
+      expect(BlockContainer).not.toHaveBeenCalled();
+      expect(run).toHaveBeenCalledTimes(2);
+      expect(callback).toHaveBeenCalledWith(db, makeSampleLogs());
+    });
+  });
 });
