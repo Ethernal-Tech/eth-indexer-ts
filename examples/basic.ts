@@ -46,11 +46,11 @@ async function main() {
     new SqliteDatabase(dbPath),
     logger,
     async (db) => {
-      const lastId = (db.getLastProcessedEvent() ?? -1) + 1;
-      const events = db.getEvents(lastId);
+      const lastId = ((await db.getLastProcessedEvent()) ?? -1) + 1;
+      const events = await db.getEvents(lastId);
       if (events?.length) {
         logger.info({ events }, 'Unprocessed events');
-        db.setLastProcessedEvent(events[events.length - 1].id);
+        await db.setLastProcessedEvent(events[events.length - 1].id);
       }
     },
   );

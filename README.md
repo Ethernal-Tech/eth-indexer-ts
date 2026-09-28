@@ -42,11 +42,11 @@ const indexer = new Indexer(
   logger,
   async (db) => {
     // optional callback — called after each batch of logs is confirmed
-    const lastId = (db.getLastProcessedEvent() ?? -1) + 1;
-    const events = db.getEvents(lastId);
+    const lastId = ((await db.getLastProcessedEvent()) ?? -1) + 1;
+    const events = await db.getEvents(lastId);
     if (events?.length) {
       logger.info({ events }, 'New events');
-      db.setLastProcessedEvent(events[events.length - 1].id);
+      await db.setLastProcessedEvent(events[events.length - 1].id);
     }
   },
 );
@@ -208,7 +208,7 @@ All major components are interface-driven and replaceable:
 | Interface | Default implementation | Description |
 |---|---|---|
 | `IEthClient` | `EthersEthClient` | Ethereum RPC client (ethers v6) |
-| `IDatabase` | `SqliteDatabase` | Persistent storage (better-sqlite3) |
+| `IDatabase` | `SqliteDatabase` | Persistent storage (better-sqlite3); every method returns a `Promise` |
 | `ILogger` | `PinoLogger` | Structured logger (pino) |
 
 ## Contributing / local development

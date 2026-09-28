@@ -57,21 +57,21 @@ class MockDB {
   private lastProcessedBlock: number | null = null;
   private lastProcessedEvent: number | null = null;
 
-  insertBlock(block: Block) { this.blocks.push(block); }
-  getLastBlock() { return this.blocks.at(-1) ?? null; }
-  getBlocks(fromBlockNumber: number, limit?: number): Block[] {
+  async insertBlock(block: Block) { this.blocks.push(block); }
+  async getLastBlock() { return this.blocks.at(-1) ?? null; }
+  async getBlocks(fromBlockNumber: number, limit?: number): Promise<Block[]> {
     const filtered = this.blocks.filter(b => b.number >= fromBlockNumber);
     return limit !== undefined ? filtered.slice(0, limit) : filtered;
   }
-  getLastProcessedBlock() { return this.lastProcessedBlock; }
-  insertEventAndSetLastProcessedBlock(events: LogEvent[], blockNumber: number) {
+  async getLastProcessedBlock() { return this.lastProcessedBlock; }
+  async insertEventAndSetLastProcessedBlock(events: LogEvent[], blockNumber: number) {
     this.events.push(...events);
     this.lastProcessedBlock = blockNumber;
   }
-  getEvents(fromId: number, limit?: number) { return this.events.slice(fromId); }
-  getLastProcessedEvent() { return this.lastProcessedEvent; }
-  setLastProcessedEvent(n: number) { this.lastProcessedEvent = n; }
-  initDb() {}
+  async getEvents(fromId: number, limit?: number) { return this.events.slice(fromId); }
+  async getLastProcessedEvent() { return this.lastProcessedEvent; }
+  async setLastProcessedEvent(n: number) { this.lastProcessedEvent = n; }
+  async initDb() {}
 
   getAllEvents() { return this.events; }
 }
@@ -105,9 +105,9 @@ describe('LogsProcessor', () => {
   });
 
   it('returns undefined when all blocks were already processed', async () => {
-    db.insertBlock(makeBlock(1));
-    db.insertBlock(makeBlock(2));
-    db.insertEventAndSetLastProcessedBlock([], 2); // mark block 2 as last processed
+    await db.insertBlock(makeBlock(1));
+    await db.insertBlock(makeBlock(2));
+    await db.insertEventAndSetLastProcessedBlock([], 2); // mark block 2 as last processed
     const processor = new LogsProcessor(makeConfig(), db as any, client, noopLogger);
     const result = await processor.process();
     expect(result).toBeUndefined();
@@ -116,8 +116,8 @@ describe('LogsProcessor', () => {
   // ── single batch ───────────────────────────────────────────────────────────
 
   it('processes a single batch and returns logs', async () => {
-    db.insertBlock(makeBlock(1));
-    db.insertBlock(makeBlock(2));
+    await db.insertBlock(makeBlock(1));
+    await db.insertBlock(makeBlock(2));
     client.getLogs = vi.fn(() =>
       Promise.resolve([makeReceiptLog('0xAAA', '0xTOPIC1', '0xffcc', 10)])
     );
@@ -130,28 +130,28 @@ describe('LogsProcessor', () => {
   });
 
   it('calls getLogs with correct address array, fromBlock and toBlock', async () => {
-    db.insertBlock(makeBlock(5));
-    db.insertBlock(makeBlock(6));
+    await db.insertBlock(makeBlock(5));
+    await db.insertBlock(makeBlock(6));
     const processor = new LogsProcessor(makeConfig({ maxBatchSize: 10, addresses: ['0xBBB'] }), db as any, client, noopLogger);
     await processor.process();
     expect(client.getLogs).toHaveBeenCalledWith(5, 6, ['0xbbb'], undefined);
   });
 
   it('saves logs and updates last processed block after each batch', async () => {
-    db.insertBlock(makeBlock(1));
+    await db.insertBlock(makeBlock(1));
     const mockLog = makeReceiptLog('0xAAA', '0xTOPIC1');
     client.getLogs = vi.fn(() => Promise.resolve([mockLog]));
     const processor = new LogsProcessor(makeConfig(), db as any, client, noopLogger);
     await processor.process();
     expect(db.getAllEvents()).toHaveLength(1);
-    expect(db.getLastProcessedBlock()).toBe(1);
+    expect(await db.getLastProcessedBlock()).toBe(1);
   });
 
   // ── multi-batch ────────────────────────────────────────────────────────────
 
   it('splits into multiple batches when block range exceeds maxBatchSize', async () => {
     // blocks 1–5, maxBatchSize=2 → batches [1-2], [3-4], [5-5]
-    for (let i = 1; i <= 5; i++) db.insertBlock(makeBlock(i));
+    for (let i = 1; i <= 5; i++) await db.insertBlock(makeBlock(i));
     const processor = new LogsProcessor(makeConfig({ maxBatchSize: 2 }), db as any, client, noopLogger);
     await processor.process();
     expect(client.getLogs).toHaveBeenCalledTimes(3);
@@ -161,7 +161,7 @@ describe('LogsProcessor', () => {
   });
 
   it('accumulates logs from all batches', async () => {
-    for (let i = 1; i <= 4; i++) db.insertBlock(makeBlock(i));
+    for (let i = 1; i <= 4; i++) await db.insertBlock(makeBlock(i));
     client.getLogs = vi.fn(() =>
       Promise.resolve([makeReceiptLog('0xAAA', '0xTOPIC1')])
     );
@@ -172,17 +172,17 @@ describe('LogsProcessor', () => {
   });
 
   it('last processed block is set to batchTo of the final batch', async () => {
-    for (let i = 1; i <= 5; i++) db.insertBlock(makeBlock(i));
+    for (let i = 1; i <= 5; i++) await db.insertBlock(makeBlock(i));
     const processor = new LogsProcessor(makeConfig({ maxBatchSize: 2 }), db as any, client, noopLogger);
     await processor.process();
-    expect(db.getLastProcessedBlock()).toBe(5);
+    expect(await db.getLastProcessedBlock()).toBe(5);
   });
 
   // ── starts from lastProcessedBlock + 1 ────────────────────────────────────
 
   it('only processes blocks after lastProcessedBlock', async () => {
-    for (let i = 1; i <= 4; i++) db.insertBlock(makeBlock(i));
-    db.insertEventAndSetLastProcessedBlock([], 2); // blocks 1-2 already processed
+    for (let i = 1; i <= 4; i++) await db.insertBlock(makeBlock(i));
+    await db.insertEventAndSetLastProcessedBlock([], 2); // blocks 1-2 already processed
     const processor = new LogsProcessor(makeConfig({ maxBatchSize: 10 }), db as any, client, noopLogger);
     await processor.process();
     expect(client.getLogs).toHaveBeenCalledWith(3, 4, expect.any(Array), undefined);
@@ -192,7 +192,7 @@ describe('LogsProcessor', () => {
   // ── topic filtering ────────────────────────────────────────────────────────
 
   it('passes all logs through when no topics are configured', async () => {
-    db.insertBlock(makeBlock(1));
+    await db.insertBlock(makeBlock(1));
     client.getLogs = vi.fn(() =>
       Promise.resolve([
         makeReceiptLog('0xAAA', '0xTOPIC_ANY_1'),
@@ -205,7 +205,7 @@ describe('LogsProcessor', () => {
   });
 
   it('passes all logs through when topics array is empty', async () => {
-    db.insertBlock(makeBlock(1));
+    await db.insertBlock(makeBlock(1));
     client.getLogs = vi.fn(() =>
       Promise.resolve([makeReceiptLog('0xAAA', '0xTOPIC_ANY')])
     );
@@ -215,7 +215,7 @@ describe('LogsProcessor', () => {
   });
 
   it('forwards configured topics to getLogs', async () => {
-    db.insertBlock(makeBlock(1));
+    await db.insertBlock(makeBlock(1));
     const processor = new LogsProcessor(
       makeConfig({ addresses: ['0xAAA'], topics: [['0xMATCH']] }),
       db as any,
@@ -227,7 +227,7 @@ describe('LogsProcessor', () => {
   });
 
   it('does not filter locally - the node applies the topic filter', async () => {
-    db.insertBlock(makeBlock(1));
+    await db.insertBlock(makeBlock(1));
     client.getLogs = vi.fn(() =>
       Promise.resolve([
         makeReceiptLog('0xAAA', '0xMATCH'),
@@ -246,7 +246,7 @@ describe('LogsProcessor', () => {
   });
 
   it('stores logs regardless of which address they came from', async () => {
-    db.insertBlock(makeBlock(1));
+    await db.insertBlock(makeBlock(1));
     client.getLogs = vi.fn(() =>
       Promise.resolve([makeReceiptLog('0xUNKNOWN', '0xANYTOPIC')])
     );
@@ -265,7 +265,7 @@ describe('LogsProcessor', () => {
   // ── address batching ───────────────────────────────────────────────────────
 
   it('splits addresses into batches of addressesBatchSize', async () => {
-    db.insertBlock(makeBlock(1));
+    await db.insertBlock(makeBlock(1));
     const processor = new LogsProcessor(
       makeConfig({ addresses: ['0xA', '0xB', '0xC', '0xD', '0xE'], addressesBatchSize: 2 }),
       db as any,
@@ -281,7 +281,7 @@ describe('LogsProcessor', () => {
   });
 
   it('makes a single address-less call when no addresses are configured', async () => {
-    db.insertBlock(makeBlock(1));
+    await db.insertBlock(makeBlock(1));
     const processor = new LogsProcessor(
       makeConfig({ addresses: [], topics: [['0xTOPIC']] }),
       db as any,
@@ -295,7 +295,7 @@ describe('LogsProcessor', () => {
   });
 
   it('merges logs from all address batches', async () => {
-    db.insertBlock(makeBlock(1));
+    await db.insertBlock(makeBlock(1));
     client.getLogs = vi.fn((_from: number, _to: number, addresses?: string[]) =>
       Promise.resolve([makeReceiptLog(addresses![0], '0xTOPIC')])
     );
@@ -314,7 +314,7 @@ describe('LogsProcessor', () => {
   // ── runtime address updates ────────────────────────────────────────────────
 
   it('picks up addresses updated via setAddresses on the next process() call', async () => {
-    db.insertBlock(makeBlock(1));
+    await db.insertBlock(makeBlock(1));
     const config = makeConfig({ addresses: ['0xAAA'], addressesBatchSize: 10 });
     const processor = new LogsProcessor(config, db as any, client, noopLogger);
 
@@ -323,14 +323,14 @@ describe('LogsProcessor', () => {
 
     // new address added from outside, and a new block arrives
     config.setAddresses(['0xaaa', '0xbbb']);
-    db.insertBlock(makeBlock(2));
+    await db.insertBlock(makeBlock(2));
 
     await processor.process();
     expect(client.getLogs).toHaveBeenNthCalledWith(2, 2, 2, ['0xaaa', '0xbbb'], undefined);
   });
 
   it('passes setAddresses values through untouched — the caller owns the casing', async () => {
-    db.insertBlock(makeBlock(1));
+    await db.insertBlock(makeBlock(1));
     const config = makeConfig({ addresses: ['0xAAA'], addressesBatchSize: 10 });
     const processor = new LogsProcessor(config, db as any, client, noopLogger);
 
@@ -342,7 +342,7 @@ describe('LogsProcessor', () => {
   // ── empty log list from client ─────────────────────────────────────────────
 
   it('returns empty array when getLogs returns no logs', async () => {
-    db.insertBlock(makeBlock(1));
+    await db.insertBlock(makeBlock(1));
     client.getLogs = vi.fn(() => Promise.resolve([]));
     const processor = new LogsProcessor(makeConfig(), db as any, client, noopLogger);
     const result = await processor.process();
@@ -352,7 +352,7 @@ describe('LogsProcessor', () => {
   // ── stopping part way through a catch-up ──────────────────────────────────
 
   it('stops between batches once the signal aborts', async () => {
-    for (let i = 1; i <= 50; i++) db.insertBlock(makeBlock(i));
+    for (let i = 1; i <= 50; i++) await db.insertBlock(makeBlock(i));
     const controller = new AbortController();
     client.getLogs = vi.fn(() => {
       controller.abort();
@@ -366,23 +366,23 @@ describe('LogsProcessor', () => {
     // 50 blocks in batches of 10 would be 5 calls if it ran to the end
     expect(client.getLogs).toHaveBeenCalledTimes(1);
     // the batch that did finish still committed, so the rest resumes next run
-    expect(db.getLastProcessedBlock()).toBe(10);
+    expect(await db.getLastProcessedBlock()).toBe(10);
     expect(result).toHaveLength(1);
   });
 
   it('processes every batch when the signal never aborts', async () => {
-    for (let i = 1; i <= 50; i++) db.insertBlock(makeBlock(i));
+    for (let i = 1; i <= 50; i++) await db.insertBlock(makeBlock(i));
     const processor = new LogsProcessor(
       makeConfig({ maxBatchSize: 10 }), db as any, client, noopLogger);
 
     await processor.process(new AbortController().signal);
 
     expect(client.getLogs).toHaveBeenCalledTimes(5);
-    expect(db.getLastProcessedBlock()).toBe(50);
+    expect(await db.getLastProcessedBlock()).toBe(50);
   });
 
   it('processes every batch when no signal is given at all', async () => {
-    for (let i = 1; i <= 50; i++) db.insertBlock(makeBlock(i));
+    for (let i = 1; i <= 50; i++) await db.insertBlock(makeBlock(i));
     const processor = new LogsProcessor(
       makeConfig({ maxBatchSize: 10 }), db as any, client, noopLogger);
 

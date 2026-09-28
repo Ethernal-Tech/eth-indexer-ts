@@ -24,8 +24,8 @@ function makeBlock(number: number, hash?: string, parentHash?: string): any {
 
 class MockDB {
   private block: any = null;
-  getLastBlock() { return this.block; }
-  insertBlock(block: any) { this.block = block; }
+  async getLastBlock() { return this.block; }
+  async insertBlock(block: any) { this.block = block; }
 }
 
 class MockClient {
@@ -56,14 +56,14 @@ describe('BlockContainer - full coverage', () => {
   });
 
   it('should initialize with a confirmed block', async () => {
-    db.insertBlock(makeBlock(1, 'hash1'));
+    await db.insertBlock(makeBlock(1, 'hash1'));
     container = mkContainer(2, 0);
     await container.init();
     expect(container['latestConfirmedBlock']).toEqual(makeBlock(1, 'hash1'));
   });
 
   it('should initialize with a confirmed block if greater than start block', async () => {
-    db.insertBlock(makeBlock(1, 'hash1'));
+    await db.insertBlock(makeBlock(1, 'hash1'));
     container = mkContainer(2, 0);
     await container.init();
     expect(container['latestConfirmedBlock']).toEqual(makeBlock(1, 'hash1'));
@@ -90,7 +90,7 @@ describe('BlockContainer - full coverage', () => {
     expect(await container.process()).toBe(false);
     client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(6, 'hash6', 'hash5')));
     expect(await container.process()).toBe(true);
-    const { number, hash, parentHash } = db.getLastBlock()
+    const { number, hash, parentHash } = await db.getLastBlock()
     expect([number, hash, parentHash]).toEqual([4, 'hash4', 'hash3']);
   });
 
@@ -109,7 +109,7 @@ describe('BlockContainer - full coverage', () => {
   });
 
   it('should throw FatalIndexerError if block number matches but hash does not', async () => {
-    db.insertBlock(makeBlock(1, 'hash1'));
+    await db.insertBlock(makeBlock(1, 'hash1'));
     client.setBlock(makeBlock(1, 'DIFFERENT_HASH'));
     container = mkContainer(2, 0);
     await container.init();
@@ -118,7 +118,7 @@ describe('BlockContainer - full coverage', () => {
   });
 
   it('should throw FatalIndexerError if parentHash does not match latestConfirmedBlock.hash', async () => {
-    db.insertBlock(makeBlock(1, 'hash1'));
+    await db.insertBlock(makeBlock(1, 'hash1'));
     client.setBlock(makeBlock(2, 'hash2', 'WRONG_PARENT'));
     container = mkContainer(2, 0);
     await container.init();
@@ -136,7 +136,7 @@ describe('BlockContainer - full coverage', () => {
   });
 
   it('should handle reorg: new block with different parent', async () => {
-    db.insertBlock(makeBlock(1, 'hash1'));
+    await db.insertBlock(makeBlock(1, 'hash1'));
     // Simulate chain: 2a (hash2a, parent hash1), 3a (hash3a, parent hash2a)
     client.setBlock(makeBlock(2, 'hash2a', 'hash1'));
     client.setBlock(makeBlock(3, 'hash3a', 'hash2a'));
@@ -159,11 +159,11 @@ describe('BlockContainer - full coverage', () => {
     client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(4, 'hash4b', 'hash3b')));
     await container.process();
     // Confirm block 2b
-    expect(db.getLastBlock().hash).toBe('hash2b');
+    expect((await db.getLastBlock()).hash).toBe('hash2b');
   });
 
   it('should handle out-of-sync: handleNewBlockFromFirst', async () => {
-    db.insertBlock(makeBlock(1, 'hash1'));
+    await db.insertBlock(makeBlock(1, 'hash1'));
     // Simulate missing blocks: jump to block 5
     for (let i = 2; i <= 5; i++) {
       client.setBlock(makeBlock(i, `hash${i}`, `hash${i - 1}`));
@@ -173,11 +173,11 @@ describe('BlockContainer - full coverage', () => {
     client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(5, 'hash5', 'hash4')));
     const confirmed = await container.process();
     expect(confirmed).toBe(true);
-    expect(db.getLastBlock().number).toBe(3); // 2 confirmations: block5 confirms block3 (buffer fills at [3,4,5])
+    expect((await db.getLastBlock()).number).toBe(3); // 2 confirmations: block5 confirms block3 (buffer fills at [3,4,5])
   });
 
   it('should handle out-of-sync: handleNewBlockFromLast', async () => {
-    db.insertBlock(makeBlock(1, 'hash1'));
+    await db.insertBlock(makeBlock(1, 'hash1'));
     container = mkContainer(2, 0);
     await container.init();
     // Process block 2 normally to prime the buffer
@@ -188,7 +188,7 @@ describe('BlockContainer - full coverage', () => {
     client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(4, 'hash4', 'hash3')));
     const confirmed = await container.process();
     expect(confirmed).toBe(true);
-    expect(db.getLastBlock().number).toBe(2);
+    expect((await db.getLastBlock()).number).toBe(2);
   });
 
   it('should process first block if no confirmed or unconfirmed blocks', async () => {
@@ -232,7 +232,7 @@ describe('BlockContainer - full coverage', () => {
   });
 
   it('should return false for block older than latestConfirmedBlock', async () => {
-    db.insertBlock(makeBlock(5, 'hash5', 'hash4'));
+    await db.insertBlock(makeBlock(5, 'hash5', 'hash4'));
     container = mkContainer(2, 0);
     await container.init();
     client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(3, 'hash3', 'hash2')));
@@ -280,7 +280,7 @@ describe('BlockContainer - full coverage', () => {
   });
 
   it('should throw IndexerError in handleNewBlockFromFirst when intermediate block is null', async () => {
-    db.insertBlock(makeBlock(1, 'hash1'));
+    await db.insertBlock(makeBlock(1, 'hash1'));
     container = mkContainer(2, 0);
     await container.init();
     // gap of 5 (block 6 - block 1 = 5 > confirmationBlockCount=2) => handleNewBlockFromFirst
@@ -292,7 +292,7 @@ describe('BlockContainer - full coverage', () => {
   });
 
   it('should warn and return when intermediate block parent hash mismatches in handleNewBlockFromFirst', async () => {
-    db.insertBlock(makeBlock(1, 'hash1'));
+    await db.insertBlock(makeBlock(1, 'hash1'));
     container = mkContainer(2, 0);
     await container.init();
     // Block 3 returned with wrong parentHash - should warn and return, leaving block2 in buffer
@@ -311,7 +311,7 @@ describe('BlockContainer - full coverage', () => {
   });
 
   it('should warn and return when final block parent hash mismatches in handleNewBlockFromFirst', async () => {
-    db.insertBlock(makeBlock(1, 'hash1'));
+    await db.insertBlock(makeBlock(1, 'hash1'));
     container = mkContainer(2, 0);
     await container.init();
     // Blocks 2,3,4 are fine and fill the buffer confirming block2; block5 has WRONG parentHash
@@ -320,14 +320,14 @@ describe('BlockContainer - full coverage', () => {
     const warnSpy = vi.spyOn(noopLogger, 'warn');
     const result = await container.process();
     expect(result).toBe(true); // block2 was confirmed during backfill
-    expect(db.getLastBlock().number).toBe(2);
+    expect((await db.getLastBlock()).number).toBe(2);
     expect(warnSpy).toHaveBeenCalledOnce();
     expect(container['blocksBuffer'].len()).toBe(0);
     warnSpy.mockRestore();
   });
 
   it('should throw IndexerError in handleNewBlockFromLast when backfilled block is null', async () => {
-    db.insertBlock(makeBlock(1, 'hash1'));
+    await db.insertBlock(makeBlock(1, 'hash1'));
     container = mkContainer(2, 0);
     await container.init();
     // Prime buffer with block 2
@@ -342,7 +342,7 @@ describe('BlockContainer - full coverage', () => {
   });
 
   it('should recover gracefully in handleNewBlockFromLast when backfilled block hash mismatches', async () => {
-    db.insertBlock(makeBlock(1, 'hash1'));
+    await db.insertBlock(makeBlock(1, 'hash1'));
     container = mkContainer(2, 0);
     await container.init();
     client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(2)));
@@ -353,11 +353,11 @@ describe('BlockContainer - full coverage', () => {
     client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(5, 'hash5', 'WEIRD_PARENT')));
     const confirmed = await container.process();
     expect(confirmed).toBe(true);
-    expect(db.getLastBlock().number).toBe(2);
+    expect((await db.getLastBlock()).number).toBe(2);
   });
 
   it('should handle deep reorg in handleNewBlockFromLast and reconnect to confirmed', async () => {
-    db.insertBlock(makeBlock(1, 'hash1'));
+    await db.insertBlock(makeBlock(1, 'hash1'));
     container = mkContainer(2, 0);
     await container.init();
     // Build buffer [2a, 3a] on fork-a
@@ -378,11 +378,11 @@ describe('BlockContainer - full coverage', () => {
     client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(5, 'hash5b', 'hash4b')));
     const confirmed = await container.process();
     expect(confirmed).toBe(true);
-    expect(db.getLastBlock().hash).toBe('hash3b');
+    expect((await db.getLastBlock()).hash).toBe('hash3b');
   });
 
   it('should throw FatalIndexerError in deep reorg when chain does not connect to confirmed', async () => {
-    db.insertBlock(makeBlock(1, 'hash1'));
+    await db.insertBlock(makeBlock(1, 'hash1'));
     container = mkContainer(2, 0);
     await container.init();
     client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(2, 'hash2a', 'hash1')));
@@ -401,7 +401,7 @@ describe('BlockContainer - full coverage', () => {
   });
 
   it('should throw IndexerError in deep reorg when a backfilled block is null', async () => {
-    db.insertBlock(makeBlock(1, 'hash1'));
+    await db.insertBlock(makeBlock(1, 'hash1'));
     container = mkContainer(2, 0);
     await container.init();
     client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(2, 'hash2a', 'hash1')));
@@ -418,7 +418,7 @@ describe('BlockContainer - full coverage', () => {
   });
 
   it('should throw IndexerError in deep reorg when backfilled block hash mismatches', async () => {
-    db.insertBlock(makeBlock(1, 'hash1'));
+    await db.insertBlock(makeBlock(1, 'hash1'));
     container = mkContainer(2, 0);
     await container.init();
     client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(2, 'hash2a', 'hash1')));
@@ -436,7 +436,7 @@ describe('BlockContainer - full coverage', () => {
   });
 
   it('should keep confirming blocks after a failed insert instead of wedging the buffer', async () => {
-    db.insertBlock(makeBlock(1, 'hash1'));
+    await db.insertBlock(makeBlock(1, 'hash1'));
     container = mkContainer(2, 0);
     await container.init();
 
@@ -456,7 +456,7 @@ describe('BlockContainer - full coverage', () => {
   });
 
   it('should abandon a backfill as soon as the signal aborts', async () => {
-    db.insertBlock(makeBlock(1, 'hash1'));
+    await db.insertBlock(makeBlock(1, 'hash1'));
     // 50ms per block, so 40 blocks would take 2s if the throttle were not cut short
     container = new BlockContainer(db, client, 2, 0, 50, noopLogger);
     await container.init();
@@ -473,7 +473,7 @@ describe('BlockContainer - full coverage', () => {
   });
 
   it('should add nothing when the signal aborts while syncing from the last block', async () => {
-    db.insertBlock(makeBlock(1, 'hash1'));
+    await db.insertBlock(makeBlock(1, 'hash1'));
     // gap of 3 == confirmationBlockCount, so this takes handleNewBlockFromLast
     container = new BlockContainer(db, client, 3, 0, 50, noopLogger);
     await container.init();
@@ -497,7 +497,7 @@ describe('BlockContainer - full coverage', () => {
     // lastBlock=block3: block.number - latestInMemBlock.number = 3-1 = 2 = confirmationBlockCount → handleNewBlockFromLast
     // backfill: block2(parent=WRONG_PARENT)
     // block2.number === confirmed.number+1, but block2.parentHash !== confirmed.hash → FatalIndexerError
-    db.insertBlock(makeBlock(1, 'hash1'));
+    await db.insertBlock(makeBlock(1, 'hash1'));
     container = mkContainer(2, 0);
     await container.init();
     client.getBlockByNumber = vi.fn((n: number) => Promise.resolve({

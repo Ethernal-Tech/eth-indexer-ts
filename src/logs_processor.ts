@@ -14,8 +14,8 @@ export class LogsProcessor {
   }
 
   async process(signal?: AbortSignal): Promise<LogEvent[] | undefined> {
-    const lastProccesedBlock = this.db.getLastProcessedBlock() ?? -1;
-    const unprocessedBlocks = this.db.getBlocks(lastProccesedBlock + 1);
+    const lastProccesedBlock = (await this.db.getLastProcessedBlock()) ?? -1;
+    const unprocessedBlocks = await this.db.getBlocks(lastProccesedBlock + 1);
     if (!unprocessedBlocks.length) {
       return undefined;
     }
@@ -54,7 +54,7 @@ export class LogsProcessor {
 
       const dbLogs = batchResults.flat();
       // save to db
-      this.db.insertEventAndSetLastProcessedBlock(dbLogs, batchTo);
+      await this.db.insertEventAndSetLastProcessedBlock(dbLogs, batchTo);
 
       newLogs.push(...dbLogs);
     }

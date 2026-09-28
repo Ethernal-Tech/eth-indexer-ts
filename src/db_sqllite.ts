@@ -13,7 +13,7 @@ export class SqliteDatabase implements IDatabase {
     this.txInsertEventsAndSetLastProcessedBlock = (_, _a) => { throw new Error('Transaction not initialized'); };
   }
 
-  initDb() {
+  async initDb() {
     this.db.exec(`
       CREATE TABLE IF NOT EXISTS blocks (
         number INTEGER PRIMARY KEY,
@@ -58,7 +58,7 @@ export class SqliteDatabase implements IDatabase {
     });
   }
 
-  insertBlock(block: Block) {
+  async insertBlock(block: Block) {
     const txHashes = block.txHashes?.length ? block.txHashes.join(',') : null;
     // OR REPLACE: a chain restart replays heights the table already holds, and a
     // plain INSERT would fail the primary key and stall block confirmation
@@ -66,12 +66,12 @@ export class SqliteDatabase implements IDatabase {
     stmt.run(block.number, block.hash, block.parentHash, block.timestamp, txHashes);
   }
 
-  getLastBlock(): Block | null {
+  async getLastBlock(): Promise<Block | null> {
     const row = this.db.prepare('SELECT * FROM blocks ORDER BY number DESC LIMIT 1').get();
     return this.rowToBlock(row);
   }
 
-  getBlocks(fromBlockNumber: number, limit?: number): Block[] {
+  async getBlocks(fromBlockNumber: number, limit?: number): Promise<Block[]> {
     let rows: unknown[];
     if (limit) {
       const stmt = this.db.prepare('SELECT * FROM blocks WHERE number >= ? ORDER BY number ASC LIMIT ?');
@@ -83,26 +83,26 @@ export class SqliteDatabase implements IDatabase {
     return rows.map((row: any) => this.rowToBlock(row)!);
   }
 
-  getLastProcessedEvent(): number | null {
+  async getLastProcessedEvent(): Promise<number | null> {
     const row = this.db.prepare('SELECT number FROM last_processed_event WHERE id = 1').get();
     return row ? (row as any).number : null;
   }
 
-  setLastProcessedEvent(number: number) {
+  async setLastProcessedEvent(number: number) {
     const stmt = this.db.prepare('INSERT OR REPLACE INTO last_processed_event(id, number) VALUES(1, ?)');
     stmt.run(number);
   }
 
-  getLastProcessedBlock(): number | null {
+  async getLastProcessedBlock(): Promise<number | null> {
     const row = this.db.prepare('SELECT number FROM last_processed_block WHERE id = 1').get();
     return row ? (row as any).number : null;
   }
 
-  insertEventAndSetLastProcessedBlock(events: LogEvent[], blockNumber: number) {
-    return this.txInsertEventsAndSetLastProcessedBlock(events, blockNumber);
+  async insertEventAndSetLastProcessedBlock(events: LogEvent[], blockNumber: number) {
+    this.txInsertEventsAndSetLastProcessedBlock(events, blockNumber);
   }
 
-  getEvents(fromId: number, limit?: number): LogEvent[] {
+  async getEvents(fromId: number, limit?: number): Promise<LogEvent[]> {
     let rows: unknown[];
     if (limit) {
       const stmt = this.db.prepare('SELECT * FROM events WHERE id >= ? ORDER BY id LIMIT ?');
