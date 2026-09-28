@@ -44,7 +44,7 @@ export class Indexer {
   }
 
   async init() {
-    this.db.initDb();
+    await this.db.initDb();
     await this.blocksContainer.init();
   }
 

@@ -40,14 +40,14 @@ function makeConfig(): Config {
 
 class MockDB {
   initDb = vi.fn();
-  getLastBlock = vi.fn(() => null);
+  getLastBlock = vi.fn(async () => null);
   insertBlock = vi.fn();
-  getBlocks = vi.fn(() => []);
-  getLastProcessedBlock = vi.fn((): number | null => null);
+  getBlocks = vi.fn(async () => []);
+  getLastProcessedBlock = vi.fn(async (): Promise<number | null> => null);
   insertEventAndSetLastProcessedBlock = vi.fn();
-  getLastProcessedEvent = vi.fn((): number | null => null);
+  getLastProcessedEvent = vi.fn(async (): Promise<number | null> => null);
   setLastProcessedEvent = vi.fn();
-  getEvents = vi.fn(() => [] as LogEvent[]);
+  getEvents = vi.fn(async () => [] as LogEvent[]);
 }
 
 class MockClient {

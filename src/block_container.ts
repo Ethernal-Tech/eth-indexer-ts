@@ -38,14 +38,14 @@ export class BlockContainer {
   }
 
   async init() {
-    const latestConfirmedBlock = this.db.getLastBlock();
+    const latestConfirmedBlock = await this.db.getLastBlock();
     if (latestConfirmedBlock === null || this.startBlockNumber > latestConfirmedBlock.number) {
       // NOTE: in this case we are assuming that startBlockNumber is confirmed!
       this.latestConfirmedBlock = await this.client.getBlockByNumber(this.startBlockNumber);
       if (this.latestConfirmedBlock === null) {
         throw new FatalIndexerError(`Failed to retrieve start block ${this.startBlockNumber}`);
       }
-      this.db.insertBlock(this.latestConfirmedBlock);
+      await this.db.insertBlock(this.latestConfirmedBlock);
     } else {
       this.latestConfirmedBlock = latestConfirmedBlock;
     }
@@ -130,7 +130,7 @@ export class BlockContainer {
         return hasNewConfirmedBlock;
       }
 
-      const nb = this.addBlock(block);
+      const nb = await this.addBlock(block);
       hasNewConfirmedBlock ||= nb;
       currentBlock = block;
 
@@ -148,7 +148,7 @@ export class BlockContainer {
       return hasNewConfirmedBlock;
     }
 
-    const nb = this.addBlock(lastBlock);
+    const nb = await this.addBlock(lastBlock);
     return hasNewConfirmedBlock || nb;
   }
 
@@ -198,14 +198,14 @@ export class BlockContainer {
     // add from last to first, so we can process them in correct order from first to last
     let hasNewConfirmedBlock = false;
     for (let i = blocks.length - 1; i >= 0; i--) {
-      const nb = this.addBlock(blocks[i]);
+      const nb = await this.addBlock(blocks[i]);
       hasNewConfirmedBlock ||= nb;
     }
 
     return hasNewConfirmedBlock
   }
 
-  private addBlock(block: Block): boolean {
+  private async addBlock(block: Block): Promise<boolean> {
     this.blocksBuffer.push(block);
     if (!this.blocksBuffer.isFull()) {
       return false;
@@ -213,7 +213,7 @@ export class BlockContainer {
     // retrieve the oldest block in buffer, which is the one that got confirmed, and save it to database
     const confirmedBlock = this.blocksBuffer.peek()!;
     try {
-      this.db.insertBlock(confirmedBlock);
+      await this.db.insertBlock(confirmedBlock);
     } catch (e) {
       // undo the push: only this method drains the buffer, so leaving it full
       // would make every later addBlock throw 'buffer is full' forever
