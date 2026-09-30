@@ -240,15 +240,10 @@ describe('BlockContainer - full coverage', () => {
     expect(await container.process()).toBe(false);
   });
 
-  it('should push first block to buffer when no confirmed and no unconfirmed', async () => {
-    // Do NOT call init() - latestConfirmedBlock stays null
+  it('should throw FatalIndexerError when process runs before init', async () => {
     container = mkContainer(2, 0);
     client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(5, 'hash5', 'hash4')));
-    const result = await container.process();
-    expect(result).toBe(false); // buffer not full yet
-    expect(container['latestConfirmedBlock']).toBeNull();
-    expect(container['blocksBuffer'].len()).toBe(1);
-    expect(container['blocksBuffer'].peek()).toEqual(makeBlock(5, 'hash5', 'hash4'));
+    await expect(container.process()).rejects.toThrow(FatalIndexerError);
   });
 
   // --- process: unrecognized block in buffer  ---
@@ -264,20 +259,6 @@ describe('BlockContainer - full coverage', () => {
     // block 4 whose parentHash doesn't match anything in buffer
     client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(4, 'hash4x', 'hash_wrong')));
     await expect(container.process()).rejects.toThrow(FatalIndexerError);
-  });
-
-  it('should clear buffer when block parent not found and no confirmed block', async () => {
-    // No init - latestConfirmedBlock is null
-    container = mkContainer(2, 0);
-    // Push first block to buffer via lines 69-70 path
-    client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(5, 'hash5', 'hash4')));
-    await container.process();
-    expect(container['blocksBuffer'].len()).toBe(1);
-    // Block with same number but unrecognizable parent - buffer should be cleared
-    client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(5, 'hash5x', 'WEIRD')));
-    await container.process();
-    expect(container['blocksBuffer'].len()).toBe(1); // cleared then new block pushed
-    expect(container['blocksBuffer'].peek()!.hash).toBe('hash5x');
   });
 
   it('should throw IndexerError in handleNewBlockFromFirst when intermediate block is null', async () => {

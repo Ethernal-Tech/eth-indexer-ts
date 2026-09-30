@@ -41,11 +41,12 @@ export class BlockContainer {
     const latestConfirmedBlock = await this.db.getLastBlock();
     if (latestConfirmedBlock === null || this.startBlockNumber > latestConfirmedBlock.number) {
       // NOTE: in this case we are assuming that startBlockNumber is confirmed!
-      this.latestConfirmedBlock = await this.client.getBlockByNumber(this.startBlockNumber);
-      if (this.latestConfirmedBlock === null) {
+      const startBlock = await this.client.getBlockByNumber(this.startBlockNumber);
+      if (startBlock === null) {
         throw new FatalIndexerError(`Failed to retrieve start block ${this.startBlockNumber}`);
       }
-      await this.db.insertBlock(this.latestConfirmedBlock);
+      await this.db.insertBlock(startBlock);
+      this.latestConfirmedBlock = startBlock;
     } else {
       this.latestConfirmedBlock = latestConfirmedBlock;
     }
@@ -53,6 +54,7 @@ export class BlockContainer {
 
   /** `signal` lets a long backfill give up instead of waiting out every block's throttle. */
   async process(signal?: AbortSignal): Promise<boolean> {
+    const confirmed = this.getConfirmedBlock();
     const block = await this.client.getLatestBlock();
     if (!block) {
       return false;
@@ -65,33 +67,31 @@ export class BlockContainer {
     }
 
     // check current block with latest confirmed block
-    if (this.latestConfirmedBlock) {
-      if (this.latestConfirmedBlock.number === block.number) {
-        if (this.latestConfirmedBlock.hash !== block.hash) {
-          throw new FatalIndexerError(
-            `Block has the same number ${block.number} but a different hash ${block.hash} than confirmed block ${this.latestConfirmedBlock.hash}`);
-        }
-        // clear everything in unconfirmed block buffer
-        this.blocksBuffer.clear();
-        return false; // block is latest confirmed
-      } else if (this.latestConfirmedBlock.number > block.number) {
-        return false; // old block        
-      } else if (this.latestConfirmedBlock.number + 1 === block.number) {
-        // throw fatal error if hashes do not match
-        if (this.latestConfirmedBlock.hash !== block.parentHash) {
-          throw new FatalIndexerError(
-            `Block ${block.number} (${block.hash}) parent hash ${block.parentHash} does not match confirmed block hash ${this.latestConfirmedBlock.hash}`);
-        }
-        // new block will be first (and only) in unconfirmed blocks buffer
-        this.blocksBuffer.clear();
-        return this.addBlock(block);
+    if (confirmed.number === block.number) {
+      if (confirmed.hash !== block.hash) {
+        throw new FatalIndexerError(
+          `Block has the same number ${block.number} but a different hash ${block.hash} than confirmed block ${confirmed.hash}`);
       }
+      // clear everything in unconfirmed block buffer
+      this.blocksBuffer.clear();
+      return false; // block is latest confirmed
+    } else if (confirmed.number > block.number) {
+      return false; // old block
+    } else if (confirmed.number + 1 === block.number) {
+      // throw fatal error if hashes do not match
+      if (confirmed.hash !== block.parentHash) {
+        throw new FatalIndexerError(
+          `Block ${block.number} (${block.hash}) parent hash ${block.parentHash} does not match confirmed block hash ${confirmed.hash}`);
+      }
+      // new block will be first (and only) in unconfirmed blocks buffer
+      this.blocksBuffer.clear();
+      return this.addBlock(block);
     }
 
     // check if block is out to sync (more than one block from latest)
     const latestInMemBlock = this.getLatestBlock();
-    if (latestInMemBlock && latestInMemBlock!.number + 1 < block.number) {
-      if (block.number - latestInMemBlock!.number > this.confirmationBlockCount) {
+    if (latestInMemBlock.number + 1 < block.number) {
+      if (block.number - latestInMemBlock.number > this.confirmationBlockCount) {
         // synchronize from beggining of the buffer, which is safe height
         return await this.handleNewBlockFromFirst(block, signal);
       }
@@ -101,14 +101,13 @@ export class BlockContainer {
 
     // check block against blocks already in unconfirmed blocks buffer
     const [indx] = this.blocksBuffer.find((x) => x.number + 1 === block.number && x.hash === block.parentHash, true);
-    // fatal exception if parent not found in buffer but also does not match latest confirmed block (full check is in code above)
-    if (indx === -1 && this.latestConfirmedBlock) {
+    // fatal exception if parent not found in buffer (the confirmed-block parent case is handled above)
+    if (indx === -1) {
       throw new FatalIndexerError(
-        `Invalid block ${block.number} (${block.hash}) for confirmed block ${this.latestConfirmedBlock.number} (${this.latestConfirmedBlock.hash})`);
+        `Invalid block ${block.number} (${block.hash}) for confirmed block ${confirmed.number} (${confirmed.hash})`);
     }
 
     // clear everything after parent block in unconfirmed blocks buffer
-    // or clear everything if parent block is latest confirmed block (indx === -1)
     this.blocksBuffer.clearAfter(indx);
     return this.addBlock(block);
   }
@@ -116,14 +115,13 @@ export class BlockContainer {
   private async handleNewBlockFromFirst(lastBlock: Block, signal?: AbortSignal): Promise<boolean> {
     let hasNewConfirmedBlock = false;
     let currentBlock = this.getLatestBlock();
-    const startBlockNumber = currentBlock ? currentBlock.number + 1 : 0;
+    const startBlockNumber = currentBlock.number + 1;
     for (let i = startBlockNumber; i < lastBlock.number; i++) {
       const block = await this.client.getBlockByNumber(i);
       if (!block) {
         throw new IndexerError(`Failed to retrieve block ${i} while synchronizing from first block`);
-      } else if (currentBlock && currentBlock.hash !== block.parentHash) {
-        // just clear everything in buffer, because we are not sure which blocks are valid anymore,
-        // but log warning about parent hash mismatch (original code before copilot suggestion was: this.blocksBuffer.popNewest())
+      } else if (currentBlock.hash !== block.parentHash) {
+        // the chain moved under the walk, so nothing in the buffer is trusted any more
         this.blocksBuffer.clear();
 
         this.logger.warn({ number: i, expectedParentHash: currentBlock.hash, gotParentHash: block.parentHash }, 'Parent hash mismatch while synchronizing from first block');
@@ -141,10 +139,9 @@ export class BlockContainer {
       }
     }
 
-    if (currentBlock!.hash !== lastBlock.parentHash) {
-      // suggested by copilot, same as above
+    if (currentBlock.hash !== lastBlock.parentHash) {
       this.blocksBuffer.clear();
-      this.logger.warn({ number: lastBlock.number, expectedParentHash: currentBlock!.hash, gotParentHash: lastBlock.parentHash }, 'Parent hash mismatch for final block while synchronizing from first block');
+      this.logger.warn({ number: lastBlock.number, expectedParentHash: currentBlock.hash, gotParentHash: lastBlock.parentHash }, 'Parent hash mismatch for final block while synchronizing from first block');
       return hasNewConfirmedBlock;
     }
 
@@ -153,7 +150,8 @@ export class BlockContainer {
   }
 
   private async handleNewBlockFromLast(lastBlock: Block, signal?: AbortSignal): Promise<boolean> {
-    const lowestBlockNum = this.latestConfirmedBlock ? this.latestConfirmedBlock.number + 1 : 0;
+    const confirmed = this.getConfirmedBlock();
+    const lowestBlockNum = confirmed.number + 1;
     const blocks = [lastBlock];
     for (let i = lastBlock.number - 1; i >= lowestBlockNum; i--) {
       const block = await this.client.getBlockByNumber(i);
@@ -188,11 +186,9 @@ export class BlockContainer {
     }
     // if there are blocks in array, check if first one number is +1 of latest confirmed block 
     // and if hashes do not match throw fatal error, because it means that we have a fork on confirmed block
-    if (this.latestConfirmedBlock && blocks.length > 0) {
-      const block = blocks[blocks.length - 1];
-      if (this.latestConfirmedBlock.number + 1 === block.number && this.latestConfirmedBlock.hash !== block.parentHash) {
-        throw new FatalIndexerError(`Confirmed block parent hash mismatch for block ${block.number} while synchronizing from last block - expected parent hash ${this.latestConfirmedBlock.hash}, got ${block.parentHash}`);
-      }
+    const lowest = blocks[blocks.length - 1];
+    if (confirmed.number + 1 === lowest.number && confirmed.hash !== lowest.parentHash) {
+      throw new FatalIndexerError(`Confirmed block parent hash mismatch for block ${lowest.number} while synchronizing from last block - expected parent hash ${confirmed.hash}, got ${lowest.parentHash}`);
     }
 
     // add from last to first, so we can process them in correct order from first to last
@@ -226,8 +222,15 @@ export class BlockContainer {
     return true;
   }
 
-  private getLatestBlock(): Block | null {
-    const newestBlock = this.blocksBuffer.peekNewest();
-    return newestBlock ? newestBlock : this.latestConfirmedBlock;
+  /** Set by init(); reading it earlier is a wiring error, so fail loudly. */
+  private getConfirmedBlock(): Block {
+    if (!this.latestConfirmedBlock) {
+      throw new FatalIndexerError('BlockContainer is not initialized, call init() first');
+    }
+    return this.latestConfirmedBlock;
+  }
+
+  private getLatestBlock(): Block {
+    return this.blocksBuffer.peekNewest() ?? this.getConfirmedBlock();
   }
 }
