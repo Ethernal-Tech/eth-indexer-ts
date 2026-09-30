@@ -246,9 +246,23 @@ describe('BlockContainer - full coverage', () => {
     await expect(container.process()).rejects.toThrow(FatalIndexerError);
   });
 
+  it('should ignore a head that is already in the buffer but not the newest', async () => {
+    container = new BlockContainer(db, client, 3, 1, 0, noopLogger);
+    await container.init();
+    client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(2)));
+    await container.process();
+    client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(3)));
+    await container.process();
+    // a lagging node hands back block 2 again
+    client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(2)));
+
+    expect(await container.process()).toBe(false);
+    expect(container['blocksBuffer'].toArray().map(b => b.number)).toEqual([2, 3]);
+  });
+
   // --- process: unrecognized block in buffer  ---
 
-  it('should throw FatalIndexerError when block parent not found in buffer and confirmed exists', async () => {
+  it('should recover when the tip was replaced between polls and the next head is one ahead', async () => {
     // confirmationBlockCount=3 so buffer holds 4, confirmed=1 stays while we fill [2,3]
     container = new BlockContainer(db, client, 3, 1, 0, noopLogger);
     await container.init();
@@ -256,8 +270,25 @@ describe('BlockContainer - full coverage', () => {
     await container.process();
     client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(3)));
     await container.process();
-    // block 4 whose parentHash doesn't match anything in buffer
-    client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(4, 'hash4x', 'hash_wrong')));
+    // reorg: 3 became 3b and 4 was built on it, both inside one poll interval
+    client.getBlockByNumber = vi.fn((n: number) =>
+      Promise.resolve(n === 3 ? makeBlock(3, 'hash3b', 'hash2') : makeBlock(n, `hash${n}`, `hash${n - 1}`)));
+    client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(4, 'hash4', 'hash3b')));
+
+    expect(await container.process()).toBe(false);
+    expect(container['blocksBuffer'].toArray().map(b => b.hash)).toEqual(['hash2', 'hash3b', 'hash4']);
+    expect((await db.getLastBlock()).number).toBe(1);
+  });
+
+  it('should throw FatalIndexerError when a one-ahead head does not reconnect to the confirmed block', async () => {
+    container = new BlockContainer(db, client, 3, 1, 0, noopLogger);
+    await container.init();
+    client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(2)));
+    await container.process();
+    // the node now shows a chain whose block 2 does not descend from confirmed block 1
+    client.getBlockByNumber = vi.fn((n: number) => Promise.resolve(makeBlock(n, `other${n}`, `other${n - 1}`)));
+    client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(3, 'other3', 'other2')));
+
     await expect(container.process()).rejects.toThrow(FatalIndexerError);
   });
 
@@ -290,6 +321,18 @@ describe('BlockContainer - full coverage', () => {
     expect(warnSpy).toHaveBeenCalledOnce();
     expect(container['blocksBuffer'].isEmpty()).toBe(true);
     warnSpy.mockRestore();
+  });
+
+  it('should throw FatalIndexerError when the forward sync finds a fork right above the confirmed block', async () => {
+    await db.insertBlock(makeBlock(1, 'hash1'));
+    container = mkContainer(2, 0);
+    await container.init();
+    // block 2 does not descend from confirmed block 1; the gap of 4 routes through the forward sync
+    client.getBlockByNumber = vi.fn((n: number) =>
+      Promise.resolve(n === 2 ? makeBlock(2, 'hash2', 'other1') : makeBlock(n, `hash${n}`, `hash${n - 1}`)));
+    client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(5)));
+
+    await expect(container.process()).rejects.toThrow(FatalIndexerError);
   });
 
   it('should warn and return when final block parent hash mismatches in handleNewBlockFromFirst', async () => {
