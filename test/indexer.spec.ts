@@ -53,6 +53,7 @@ class MockDB {
 class MockClient {
   getBlockByNumber = vi.fn(() => Promise.resolve(null));
   getLatestBlock = vi.fn(() => Promise.resolve(null));
+  getLatestBlockNumber = vi.fn(() => Promise.resolve(null));
   getLogs = vi.fn(() => Promise.resolve([]));
 }
 

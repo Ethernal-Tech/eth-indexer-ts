@@ -83,6 +83,7 @@ class MockClient {
   }
 
   getLatestBlock = vi.fn(async () => this.head);
+  getLatestBlockNumber = vi.fn(async () => this.head?.number ?? null);
   getBlockByNumber = vi.fn(async (n: number) => this.blocks[n] ?? null);
   getLogs = vi.fn(async (_from: number, _to: number, _addresses?: string[]): Promise<ReceiptLog[]> => []);
 }
@@ -171,6 +172,7 @@ describe('ConfirmedRangeProcessor', () => {
       number: 15, hash: '', parentHash: '', timestamp: 0, txHashes: [],
     });
     expect(client.getBlockByNumber).not.toHaveBeenCalled();
+    expect(client.getLatestBlock).not.toHaveBeenCalled();
   });
 
   it('advances the block cursor after every batch, not only at the end', async () => {

@@ -19,12 +19,12 @@ export class ConfirmedRangeProcessor {
   }
 
   async process(signal?: AbortSignal): Promise<LogEvent[] | undefined> {
-    const head = await this.client.getLatestBlock();
-    if (!head) {
+    const head = await this.client.getLatestBlockNumber();
+    if (head === null) {
       return undefined;
     }
 
-    const toBlock = head.number - this.config.getConfirmationBlocksCount();
+    const toBlock = head - this.config.getConfirmationBlocksCount();
     const lastProcessed = (await this.db.getLastProcessedBlock()) ?? -1;
     // A crash between a batch commit and its cursor row leaves the cursor behind the logs.
     const lastCursor = (await this.db.getLastBlock())?.number ?? -1;

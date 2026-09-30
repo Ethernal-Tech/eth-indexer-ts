@@ -33,6 +33,7 @@ class MockClient {
   setBlock(block: any) { this.blocks[block.number] = block; }
   getBlockByNumber = vi.fn((n: number) => Promise.resolve(this.blocks[n] ?? null));
   getLatestBlock = vi.fn(() => Promise.resolve(this.blocks[Math.max(...Object.keys(this.blocks).map(Number), 0)] ?? null));
+  getLatestBlockNumber = vi.fn(async () => (await this.getLatestBlock())?.number ?? null);
 }
 
 describe('BlockContainer - full coverage', () => {
