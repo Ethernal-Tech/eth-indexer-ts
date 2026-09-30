@@ -22,18 +22,17 @@ export class LogsProcessor {
 
     const fromBlock = unprocessedBlocks[0].number;
     const toBlock = unprocessedBlocks[unprocessedBlocks.length - 1].number;
-    const { logs } = await this.processRange(fromBlock, toBlock, signal);
-    return logs;
+    return this.processRange(fromBlock, toBlock, signal);
   }
 
-  /** Fetches and stores logs for [fromBlock, toBlock]; `processedTo` is the last batch that committed. */
+  /** Fetches and stores logs for [fromBlock, toBlock]; `onBatch` runs after each batch commits. */
   async processRange(
     fromBlock: number,
     toBlock: number,
     signal?: AbortSignal,
-  ): Promise<{ logs: LogEvent[]; processedTo: number | null }> {
+    onBatch?: (blockNumber: number) => Promise<void>,
+  ): Promise<LogEvent[]> {
     const newLogs: LogEvent[] = [];
-    let processedTo: number | null = null;
 
     for (let blockNum = fromBlock; blockNum <= toBlock; blockNum += this.config.getMaxBatchSize()) {
       // each batch commits its own cursor, so whatever is left resumes next run
@@ -66,12 +65,12 @@ export class LogsProcessor {
       const dbLogs = batchResults.flat();
       // save to db
       await this.db.insertEventAndSetLastProcessedBlock(dbLogs, batchTo);
-      
+      await onBatch?.(batchTo);
+
       newLogs.push(...dbLogs);
-      processedTo = batchTo; // remember last processed block
     }
 
-    return { logs: newLogs, processedTo };
+    return newLogs;
   }
 
   private chunkAddresses(addresses: string[], size: number): (string[] | undefined)[] {

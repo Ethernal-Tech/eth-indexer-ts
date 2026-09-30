@@ -173,6 +173,32 @@ describe('ConfirmedRangeProcessor', () => {
     expect(client.getBlockByNumber).not.toHaveBeenCalled();
   });
 
+  it('advances the block cursor after every batch, not only at the end', async () => {
+    client.setChain(20);
+    const cursors: (number | undefined)[] = [];
+    client.getLogs.mockImplementation(async () => {
+      cursors.push((await db.getLastBlock())?.number);
+      return [];
+    });
+
+    await makeProcessor(db, client).process();
+
+    expect(client.getLogs).toHaveBeenCalledTimes(2);
+    expect(cursors).toEqual([undefined, 9]);
+    expect((await db.getLastBlock())?.number).toBe(15);
+  });
+
+  it('catches the block cursor up when it fell behind the log cursor', async () => {
+    client.setChain(17);
+    await db.insertEventAndSetLastProcessedBlock([], 12);
+
+    const result = await makeProcessor(db, client).process();
+
+    expect(result).toBeUndefined();
+    expect(client.getLogs).not.toHaveBeenCalled();
+    expect((await db.getLastBlock())?.number).toBe(12);
+  });
+
   it('places the cursor at the last batch that committed when aborted part way', async () => {
     client.setChain(30);
     const controller = new AbortController();
