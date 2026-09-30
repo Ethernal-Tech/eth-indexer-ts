@@ -124,6 +124,7 @@ to set them explicitly and skip the environment entirely.
 | `ADDRESSES_BATCH_SIZE` | `5` | Max addresses per `eth_getLogs` request. Longer address lists are split into batches fetched in parallel |
 | `CONFIRMATION_BLOCKS_COUNT` | `12` | Blocks required before a block is considered confirmed |
 | `MAX_BATCH_SIZE` | `10` | Max blocks fetched per log-polling batch |
+| `MAX_BATCHES_PER_RUN` | `20` | Max batches per polling run; a longer backfill continues on the next run |
 | `PULL_BLOCK_INTERVAL_MS` | `3000` | Interval between new-block polls (ms) |
 | `PULL_BLOCKS_LOOP_INTERVAL_MS` | `500` | Interval between block-processing loop ticks (ms) |
 | `PULL_LOGS_INTERVAL_MS` | `4000` | Interval between log-fetching polls (ms) |

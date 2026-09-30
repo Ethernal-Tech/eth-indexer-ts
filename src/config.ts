@@ -10,6 +10,7 @@ export class Config {
   private readonly pullLogsIntervalMs: number;
   private readonly topics: (string | string[])[] | undefined;
   private readonly addressesBatchSize: number;
+  private readonly maxBatchesPerRun: number;
   private readonly indexingMode: IndexingMode;
   private addresses: string[];
   
@@ -23,6 +24,7 @@ export class Config {
     addresses: string[];
     topics: (string | string[])[] | undefined;
     addressesBatchSize?: number;
+    maxBatchesPerRun?: number;
     indexingMode?: IndexingMode;
   }) {
     if (!params) {
@@ -47,6 +49,7 @@ export class Config {
         pullBlocksLoopIntervalMs: envInt('PULL_BLOCKS_LOOP_INTERVAL_MS', 500),
         pullLogsIntervalMs: envInt('PULL_LOGS_INTERVAL_MS', 4000),
         addressesBatchSize: envInt('ADDRESSES_BATCH_SIZE', 5),
+        maxBatchesPerRun: envInt('MAX_BATCHES_PER_RUN', 20),
         indexingMode: envEnum('INDEXING_MODE', IndexingMode, IndexingMode.BlockTracking),
       };
     }
@@ -60,6 +63,7 @@ export class Config {
     this.addresses = params.addresses.map(a => a.toLowerCase());
     this.topics = params.topics;
     this.addressesBatchSize = params.addressesBatchSize ?? 5;
+    this.maxBatchesPerRun = params.maxBatchesPerRun ?? 20;
     this.indexingMode = params.indexingMode ?? IndexingMode.BlockTracking;
   }
 
@@ -71,6 +75,7 @@ export class Config {
   getPullLogsIntervalMs() { return this.pullLogsIntervalMs; }
   getTopics() { return this.topics; }
   getAddressesBatchSize() { return this.addressesBatchSize; }
+  getMaxBatchesPerRun() { return this.maxBatchesPerRun; }
   getAddresses() { return this.addresses; }
   getIndexingMode() { return this.indexingMode; }
   // Stored as given — unlike the constructor, which normalizes the raw env input.

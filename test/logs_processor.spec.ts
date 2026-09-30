@@ -35,11 +35,13 @@ function makeConfig(overrides?: {
   addresses?: string[];
   topics?: (string | string[])[] | undefined;
   addressesBatchSize?: number;
+  maxBatchesPerRun?: number;
 }): Config {
   return new Config({
     startBlockNumber: 0,
     confirmationBlocksCount: 12,
     maxBatchSize: overrides?.maxBatchSize ?? 10,
+    maxBatchesPerRun: overrides?.maxBatchesPerRun,
     pullBlockIntervalMs: 0,
     pullBlocksLoopIntervalMs: 0,
     pullLogsIntervalMs: 0,
@@ -408,6 +410,19 @@ describe('LogsProcessor.processRange', () => {
     expect(await db.getLastProcessedBlock()).toBe(10);
     expect(client.getLogs).toHaveBeenNthCalledWith(1, 3, 6, expect.any(Array), undefined);
     expect(client.getLogs).toHaveBeenNthCalledWith(2, 7, 10, expect.any(Array), undefined);
+  });
+
+  it('stops after maxBatchesPerRun batches and leaves the rest for the next run', async () => {
+    const db = new MockDB();
+    const client = new MockLogsClient();
+    const processor = new LogsProcessor(
+      makeConfig({ maxBatchSize: 10, maxBatchesPerRun: 3 }), db as any, client, noopLogger);
+
+    await processor.processRange(0, 99);
+
+    expect(client.getLogs).toHaveBeenCalledTimes(3);
+    expect(client.getLogs).toHaveBeenLastCalledWith(20, 29, expect.any(Array), undefined);
+    expect(await db.getLastProcessedBlock()).toBe(29);
   });
 
   it('commits nothing when aborted before the first batch', async () => {

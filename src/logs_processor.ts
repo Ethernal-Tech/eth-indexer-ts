@@ -25,7 +25,7 @@ export class LogsProcessor {
     return this.processRange(fromBlock, toBlock, signal);
   }
 
-  /** Fetches and stores logs for [fromBlock, toBlock]; `onBatch` runs after each batch commits. */
+  /** Stores logs for [fromBlock, toBlock], at most `maxBatchesPerRun` batches per call; `onBatch` runs after each commit. */
   async processRange(
     fromBlock: number,
     toBlock: number,
@@ -33,10 +33,11 @@ export class LogsProcessor {
     onBatch?: (blockNumber: number) => Promise<void>,
   ): Promise<LogEvent[]> {
     const newLogs: LogEvent[] = [];
+    let batches = 0;
 
     for (let blockNum = fromBlock; blockNum <= toBlock; blockNum += this.config.getMaxBatchSize()) {
       // each batch commits its own cursor, so whatever is left resumes next run
-      if (signal?.aborted) {
+      if (signal?.aborted || ++batches > this.config.getMaxBatchesPerRun()) {
         break;
       }
 
