@@ -280,6 +280,24 @@ describe('BlockContainer - full coverage', () => {
     expect((await db.getLastBlock()).number).toBe(1);
   });
 
+  it('should keep buffered blocks below the fork point when the head is at or below the tip', async () => {
+    container = new BlockContainer(db, client, 4, 1, 0, noopLogger);
+    await container.init();
+    for (const n of [2, 3, 4]) {
+      client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(n)));
+      await container.process();
+    }
+    // a lagging node returns 4b from a fork that split at 3; 2 is still valid and must survive
+    client.getBlockByNumber = vi.fn((n: number) =>
+      Promise.resolve(n === 3 ? makeBlock(3, 'hash3b', 'hash2') : makeBlock(n, `hash${n}`, `hash${n - 1}`)));
+    client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(4, 'hash4b', 'hash3b')));
+
+    expect(await container.process()).toBe(false);
+    expect(container['blocksBuffer'].toArray().map(b => b.hash)).toEqual(['hash2', 'hash3b', 'hash4b']);
+    expect(client.getBlockByNumber).toHaveBeenCalledTimes(1);
+    expect(client.getBlockByNumber).toHaveBeenCalledWith(3);
+  });
+
   it('should throw FatalIndexerError when a one-ahead head does not reconnect to the confirmed block', async () => {
     container = new BlockContainer(db, client, 3, 1, 0, noopLogger);
     await container.init();
@@ -308,10 +326,10 @@ describe('BlockContainer - full coverage', () => {
     await db.insertBlock(makeBlock(1, 'hash1'));
     container = mkContainer(2, 0);
     await container.init();
-    // Block 3 returned with wrong parentHash - should warn and return, leaving block2 in buffer
+    // block 4 does not link to 3: only the tip (3) is dropped, 2 still links to confirmed
     client.getBlockByNumber = vi.fn((n: number) =>
-      n === 3
-        ? Promise.resolve(makeBlock(3, 'hash3', 'WRONG_PARENT'))
+      n === 4
+        ? Promise.resolve(makeBlock(4, 'hash4', 'WRONG_PARENT'))
         : Promise.resolve(makeBlock(n))
     );
     client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(6)));
@@ -319,7 +337,7 @@ describe('BlockContainer - full coverage', () => {
     const result = await container.process();
     expect(result).toBe(false); // no confirmations yet
     expect(warnSpy).toHaveBeenCalledOnce();
-    expect(container['blocksBuffer'].isEmpty()).toBe(true);
+    expect(container['blocksBuffer'].toArray().map(b => b.number)).toEqual([2]);
     warnSpy.mockRestore();
   });
 
@@ -340,14 +358,14 @@ describe('BlockContainer - full coverage', () => {
     container = mkContainer(2, 0);
     await container.init();
     // Blocks 2,3,4 are fine and fill the buffer confirming block2; block5 has WRONG parentHash
-    // → warn and return true (block2 was confirmed), buffer has [3,4]
+    // → warn and return true (block2 was confirmed), buffer keeps [3,4]
     client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(5, 'hash5', 'WRONG_PARENT')));
     const warnSpy = vi.spyOn(noopLogger, 'warn');
     const result = await container.process();
     expect(result).toBe(true); // block2 was confirmed during backfill
     expect((await db.getLastBlock()).number).toBe(2);
     expect(warnSpy).toHaveBeenCalledOnce();
-    expect(container['blocksBuffer'].len()).toBe(0);
+    expect(container['blocksBuffer'].toArray().map(b => b.number)).toEqual([3, 4]);
     warnSpy.mockRestore();
   });
 
@@ -515,6 +533,23 @@ describe('BlockContainer - full coverage', () => {
     // it collects newest-first, so a partial range would be missing its bottom
     expect(container['blocksBuffer'].len()).toBe(0);
     expect(container['latestConfirmedBlock']!.number).toBe(1);
+  });
+
+  it('should keep a completed backfill when the signal aborts during the last read', async () => {
+    await db.insertBlock(makeBlock(1, 'hash1'));
+    container = new BlockContainer(db, client, 3, 0, 50, noopLogger);
+    await container.init();
+
+    const controller = new AbortController();
+    client.getLatestBlock = vi.fn(() => Promise.resolve(makeBlock(4, 'hash4', 'hash3')));
+    // block 2 is the bottom of the range, so nothing is missing once it arrives
+    client.getBlockByNumber = vi.fn((n: number) => {
+      if (n === 2) controller.abort();
+      return Promise.resolve(makeBlock(n, `hash${n}`, `hash${n - 1}`));
+    });
+
+    expect(await container.process(controller.signal)).toBe(false);
+    expect(container['blocksBuffer'].toArray().map(b => b.number)).toEqual([2, 3, 4]);
   });
 
   it('should throw FatalIndexerError when oldest backfilled block does not connect to confirmed block', async () => {

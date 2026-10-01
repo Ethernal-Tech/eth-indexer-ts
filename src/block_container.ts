@@ -99,14 +99,10 @@ export class BlockContainer {
 
     // check block against blocks already in unconfirmed blocks buffer
     const [indx] = this.blocksBuffer.find((x) => x.number + 1 === block.number && x.hash === block.parentHash, true);
-    // Parent unknown: a reorg replaced our tip between polls (head is one ahead) or a lagging
-    // node returned a block from another fork (head at or below our tip). Drop what can no
-    // longer be trusted - just the tip in the first case, the whole buffer in the second - and
-    // let the backward sync refetch from the node and reconnect to the confirmed block.
+    // Parent unknown: the buffered block at block.number - 1 is on a dead fork, so drop it and
+    // everything above it; the backward sync refetches from there and keeps popping on mismatch.
     if (indx === -1) {
-      if (block.number <= latestInMemBlock.number) {
-        this.blocksBuffer.clear();
-      } else {
+      while ((this.blocksBuffer.peekNewest()?.number ?? -1) >= block.number - 1) {
         this.blocksBuffer.popNewest();
       }
       return this.handleNewBlockFromLast(block, signal);
@@ -131,9 +127,8 @@ export class BlockContainer {
           throw new FatalIndexerError(
             `Block ${i} parent hash ${block.parentHash} does not match confirmed block hash ${currentBlock.hash}`);
         }
-        // the chain moved under the walk, so nothing in the buffer is trusted any more
-        this.blocksBuffer.clear();
-
+        // only the tip is known bad; the next poll re-validates the rest link by link
+        this.blocksBuffer.popNewest();
         this.logger.warn({ number: i, expectedParentHash: currentBlock.hash, gotParentHash: block.parentHash }, 'Parent hash mismatch while synchronizing from first block');
         return hasNewConfirmedBlock;
       }
@@ -150,8 +145,7 @@ export class BlockContainer {
     }
 
     if (currentBlock.hash !== lastBlock.parentHash) {
-      // clearing forces the next poll through the backward sync, which can reconnect after a reorg
-      this.blocksBuffer.clear();
+      // the head went stale during the walk; the fetched chain below it is still linked to confirmed
       this.logger.warn({ number: lastBlock.number, expectedParentHash: currentBlock.hash, gotParentHash: lastBlock.parentHash }, 'Parent hash mismatch for final block while synchronizing from first block');
       return hasNewConfirmedBlock;
     }
@@ -189,10 +183,12 @@ export class BlockContainer {
 
       blocks.push(block);
 
-      await sleep(this.pullBlocksLoopIntervalMs, signal);
-      if (signal?.aborted) {
-        // the lower half is still missing, and a partial range would leave a gap
-        return false;
+      if (i > lowestBlockNum) {
+        await sleep(this.pullBlocksLoopIntervalMs, signal);
+        if (signal?.aborted) {
+          // the lower half is still missing, and a partial range would leave a gap
+          return false;
+        }
       }
     }
     // if there are blocks in array, check if first one number is +1 of latest confirmed block 
