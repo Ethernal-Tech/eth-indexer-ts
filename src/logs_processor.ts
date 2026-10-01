@@ -22,11 +22,22 @@ export class LogsProcessor {
 
     const fromBlock = unprocessedBlocks[0].number;
     const toBlock = unprocessedBlocks[unprocessedBlocks.length - 1].number;
-    const newLogs = [];
+    return this.processRange(fromBlock, toBlock, signal);
+  }
+
+  /** Stores logs for [fromBlock, toBlock], at most `maxBatchesPerRun` batches per call; `onBatch` runs after each commit. */
+  async processRange(
+    fromBlock: number,
+    toBlock: number,
+    signal?: AbortSignal,
+    onBatch?: (blockNumber: number) => Promise<void>,
+  ): Promise<LogEvent[]> {
+    const newLogs: LogEvent[] = [];
+    let batches = 0;
 
     for (let blockNum = fromBlock; blockNum <= toBlock; blockNum += this.config.getMaxBatchSize()) {
       // each batch commits its own cursor, so whatever is left resumes next run
-      if (signal?.aborted) {
+      if (signal?.aborted || ++batches > this.config.getMaxBatchesPerRun()) {
         break;
       }
 
@@ -55,6 +66,7 @@ export class LogsProcessor {
       const dbLogs = batchResults.flat();
       // save to db
       await this.db.insertEventAndSetLastProcessedBlock(dbLogs, batchTo);
+      await onBatch?.(batchTo);
 
       newLogs.push(...dbLogs);
     }

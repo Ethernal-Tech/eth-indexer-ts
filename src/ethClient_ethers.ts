@@ -21,6 +21,15 @@ export class EthersEthClient implements IEthClient {
     return toBlock(block);
   }
 
+  async getLatestBlockNumber(): Promise<number | null> {
+    // eth_blockNumber only answers for `latest`; other tags still need the header.
+    if (this.latestBlockStrategy === BlockNumberType.Latest) {
+      return this.provider.getBlockNumber();
+    }
+    const block = await this.provider.getBlock(this.latestBlockStrategy);
+    return block?.number ?? null;
+  }
+
   async getLogs(
     fromBlock: number,
     toBlock: number,

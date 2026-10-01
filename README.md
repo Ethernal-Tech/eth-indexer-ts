@@ -124,9 +124,11 @@ to set them explicitly and skip the environment entirely.
 | `ADDRESSES_BATCH_SIZE` | `5` | Max addresses per `eth_getLogs` request. Longer address lists are split into batches fetched in parallel |
 | `CONFIRMATION_BLOCKS_COUNT` | `12` | Blocks required before a block is considered confirmed |
 | `MAX_BATCH_SIZE` | `10` | Max blocks fetched per log-polling batch |
+| `MAX_BATCHES_PER_RUN` | `20` | Max batches per polling run; a longer backfill continues on the next run |
 | `PULL_BLOCK_INTERVAL_MS` | `3000` | Interval between new-block polls (ms) |
 | `PULL_BLOCKS_LOOP_INTERVAL_MS` | `500` | Interval between block-processing loop ticks (ms) |
 | `PULL_LOGS_INTERVAL_MS` | `4000` | Interval between log-fetching polls (ms) |
+| `INDEXING_MODE` | `block_tracking` | `block_tracking` \| `confirmed_range` — see [Indexing modes](#indexing-modes) |
 
 ### Wired by your application
 
@@ -201,6 +203,22 @@ The next log-polling tick picks up the new list automatically — no restart req
 
 > **Note:** newly added addresses are indexed **going forward only**. The indexer tracks a single last-processed-block cursor, so events emitted by a new address in already-processed blocks are not backfilled. To capture history, re-index from an earlier `START_BLOCK_NUMBER` with a fresh database.
 
+## Indexing modes
+
+Both modes fetch logs with the same batched `eth_getLogs` calls and never hand over a log
+fewer than `CONFIRMATION_BLOCKS_COUNT` blocks below the head. They differ in how they find
+out which blocks are safe:
+
+| Mode | How it works | RPC cost per block | Deep reorg |
+|---|---|---|---|
+| `block_tracking` (default) | Every block header is fetched and chained by parent hash through a buffer of `CONFIRMATION_BLOCKS_COUNT` blocks; a block leaving the buffer is confirmed and its logs fetched. Two loops: blocks and logs. | One `eth_getBlockByNumber` per block, throttled by `PULL_BLOCKS_LOOP_INTERVAL_MS` when catching up | Detected: a confirmed block that no longer matches the chain is fatal |
+| `confirmed_range` | Each tick reads the head and fetches logs for every block up to `head - CONFIRMATION_BLOCKS_COUNT` in one go. One loop. | None: only the head is read, no block headers | Not detected: `CONFIRMATION_BLOCKS_COUNT` is the only protection |
+
+`confirmed_range` catches up after downtime as fast as `eth_getLogs` allows, where
+`block_tracking` walks every missed block one call at a time. `confirmed_range` stores a
+placeholder block row per tick holding only the last processed number, so a database it
+has written cannot be handed to `block_tracking`: pick the mode for a fresh database.
+
 ## Custom implementations
 
 All major components are interface-driven and replaceable:
@@ -209,6 +227,7 @@ All major components are interface-driven and replaceable:
 |---|---|---|
 | `IEthClient` | `EthersEthClient` | Ethereum RPC client (ethers v6) |
 | `IDatabase` | `SqliteDatabase` | Persistent storage (better-sqlite3); every method returns a `Promise` |
+| `IIndexingStrategy` | `createIndexingStrategy` | The polling loops the indexer drives, picked by `INDEXING_MODE`; pass your own as the last `Indexer` constructor argument |
 | `ILogger` | `PinoLogger` | Structured logger (pino) |
 
 ## Contributing / local development
